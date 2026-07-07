@@ -33,6 +33,28 @@ pub fn gen_config(profiles: &[Profile], default_idx: usize, globs: &[String]) ->
     out
 }
 
+/// Warn about globs that are not wrapped in `*` on both sides. Since matching
+/// is anchored, such a glob only matches URLs that start/end exactly there,
+/// which is usually not intended (e.g. `github.com/x` never matches
+/// `https://github.com/x`). Returns one message per suspect glob.
+pub fn glob_warnings(globs: &[String]) -> Vec<String> {
+    let mut warnings = Vec::new();
+    for line in globs {
+        for g in line.split_whitespace() {
+            let missing = match (g.starts_with('*'), g.ends_with('*')) {
+                (true, true) => continue,
+                (false, false) => "a leading and trailing",
+                (false, true) => "a leading",
+                (true, false) => "a trailing",
+            };
+            warnings.push(format!(
+                "glob \"{g}\" is missing {missing} '*'; it is anchored and may not match as expected"
+            ));
+        }
+    }
+    warnings
+}
+
 /// Turn a profile name into a TOML-safe bare-key label: lowercase, with runs of
 /// non-alphanumerics collapsed to single `-`, trimmed.
 pub fn slug(name: &str) -> String {
@@ -66,6 +88,16 @@ mod tests {
             dir: dir.into(),
             label: label.into(),
         }
+    }
+
+    #[test]
+    fn warns_on_unwrapped_globs() {
+        let globs = vec!["*ok*  needslead*  *needstrail  bare".to_string()];
+        let w = glob_warnings(&globs);
+        assert_eq!(w.len(), 3);
+        assert!(w[0].contains("needslead*") && w[0].contains("a leading '*'"));
+        assert!(w[1].contains("*needstrail") && w[1].contains("a trailing '*'"));
+        assert!(w[2].contains("bare") && w[2].contains("a leading and trailing '*'"));
     }
 
     #[test]

@@ -14,7 +14,10 @@ use crate::config;
 use crate::discover::Profile;
 
 pub enum Outcome {
-    Install(String),
+    Install {
+        config: String,
+        warnings: Vec<String>,
+    },
     Cancelled,
 }
 
@@ -34,6 +37,10 @@ pub struct Wizard {
     edit_pos: usize,
     input: Vec<char>,
     cursor: usize,
+    review_scroll: u16,
+    // Set during rendering so key handling can clamp/page correctly.
+    review_max_scroll: u16,
+    review_page: u16,
 }
 
 impl Wizard {
@@ -51,6 +58,9 @@ impl Wizard {
             edit_pos: 0,
             input: Vec::new(),
             cursor: 0,
+            review_scroll: 0,
+            review_max_scroll: 0,
+            review_page: 1,
         }
     }
 
@@ -102,10 +112,28 @@ impl Wizard {
             },
             Step::Review => match key.code {
                 KeyCode::Enter | KeyCode::Char('y') => {
-                    return Some(Outcome::Install(self.config()));
+                    return Some(Outcome::Install {
+                        config: self.config(),
+                        warnings: config::glob_warnings(&self.globs),
+                    });
                 }
                 KeyCode::Char('b') => self.step = Step::Default,
                 KeyCode::Esc | KeyCode::Char('q') => return Some(Outcome::Cancelled),
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.review_scroll = self.review_scroll.saturating_sub(1);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.review_scroll = (self.review_scroll + 1).min(self.review_max_scroll);
+                }
+                KeyCode::PageUp => {
+                    self.review_scroll = self.review_scroll.saturating_sub(self.review_page);
+                }
+                KeyCode::PageDown => {
+                    self.review_scroll =
+                        (self.review_scroll + self.review_page).min(self.review_max_scroll);
+                }
+                KeyCode::Home | KeyCode::Char('g') => self.review_scroll = 0,
+                KeyCode::End | KeyCode::Char('G') => self.review_scroll = self.review_max_scroll,
                 _ => {}
             },
         }
@@ -125,7 +153,7 @@ impl Wizard {
             .collect();
         self.edit_pos = 0;
         if self.edit_order.is_empty() {
-            self.step = Step::Review;
+            self.enter_review();
         } else {
             self.load_input();
             self.step = Step::Globs;
@@ -139,8 +167,13 @@ impl Wizard {
             self.edit_pos += 1;
             self.load_input();
         } else {
-            self.step = Step::Review;
+            self.enter_review();
         }
+    }
+
+    fn enter_review(&mut self) {
+        self.review_scroll = 0;
+        self.step = Step::Review;
     }
 
     fn load_input(&mut self) {
@@ -162,10 +195,14 @@ impl Wizard {
             Step::Globs => self.render_globs(frame, body),
             Step::Review => self.render_review(frame, body),
         }
+        // Computed after rendering the body so `review_max_scroll` is current.
         let help = match self.step {
-            Step::Default => "↑/↓ move · Enter: set as default · q/Esc quit",
-            Step::Globs => "type globs · Enter: next · Esc: back",
-            Step::Review => "Enter/y: install · b: back · q/Esc: cancel",
+            Step::Default => "↑/↓ move · Enter: set as default · q/Esc quit".to_string(),
+            Step::Globs => "type globs · Enter: next · Esc: back".to_string(),
+            Step::Review if self.review_max_scroll > 0 => {
+                "Enter/y: install · b: back · q/Esc: cancel · ↑/↓ j/k g/G: scroll".to_string()
+            }
+            Step::Review => "Enter/y: install · b: back · q/Esc: cancel".to_string(),
         };
         frame.render_widget(
             Paragraph::new(help).block(Block::default().borders(Borders::ALL).title(" Keys ")),
@@ -228,15 +265,33 @@ impl Wizard {
         frame.set_cursor_position((cursor_x, entry.y + 1));
     }
 
-    fn render_review(&self, frame: &mut Frame, area: Rect) {
+    fn render_review(&mut self, frame: &mut Frame, area: Rect) {
+        let config = self.config();
+        let total = config.lines().count() as u16;
+        let viewport = area.height.saturating_sub(2); // account for the borders
+        self.review_page = viewport.max(1);
+        self.review_max_scroll = total.saturating_sub(viewport);
+        self.review_scroll = self.review_scroll.min(self.review_max_scroll);
+
+        let mut block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Review ~/.ff-router.toml ");
+        if self.review_max_scroll > 0 {
+            // Directional hint: arrows show which way there is more to scroll.
+            let up = if self.review_scroll > 0 { '↑' } else { ' ' };
+            let down = if self.review_scroll < self.review_max_scroll {
+                '↓'
+            } else {
+                ' '
+            };
+            block = block.title_bottom(
+                Line::from(format!(" more {up}{down} · scroll: ↑/↓ j/k g/G ")).right_aligned(),
+            );
+        }
         frame.render_widget(
-            Paragraph::new(self.config())
-                .wrap(Wrap { trim: false })
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(" Review ~/.ff-router.toml "),
-                ),
+            Paragraph::new(config)
+                .scroll((self.review_scroll, 0))
+                .block(block),
             area,
         );
     }

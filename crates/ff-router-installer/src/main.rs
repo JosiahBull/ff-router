@@ -42,13 +42,15 @@ fn main() -> ExitCode {
     ratatui::restore();
 
     match outcome {
-        Ok(Outcome::Install(config)) => match install::run(&repo_root(), &config) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("install failed: {e}");
-                ExitCode::FAILURE
+        Ok(Outcome::Install { config, warnings }) => {
+            match install::run(&repo_root(), &config, &warnings) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("install failed: {e}");
+                    ExitCode::FAILURE
+                }
             }
-        },
+        }
         Ok(Outcome::Cancelled) => {
             println!("Cancelled — nothing was changed.");
             ExitCode::SUCCESS
