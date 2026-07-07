@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "ff-router"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "block2",
  "globset",
@@ -184,7 +184,7 @@ dependencies = [
 
 [[package]]
 name = "ff-router-installer"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "ratatui",
  "similar",
