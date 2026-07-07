@@ -16,10 +16,14 @@ then launches an interactive terminal wizard (the `ff-router-installer` crate)
 that discovers your Firefox profiles and walks you through building
 `~/.ff-router.toml`. It then steps through each install action — writing the
 config, moving `Firefox Router.app` into `~/Applications`, setting permissions,
-registering, and cleaning up — confirming before each one. If a target already
-exists (e.g. a previous config) it offers **Compare** (a colour diff) /
-**Replace** / **Skip** / **Abort**. Afterwards, set it as the default browser in
-**System Settings → Desktop & Dock → Default web browser**.
+registering, requesting to become your default browser, and cleaning up —
+confirming before each one. If a target already exists (e.g. a previous config)
+it offers **Compare** (a colour diff) / **Replace** / **Skip** / **Abort**.
+
+The default-browser step triggers the macOS "change your default web browser?"
+prompt — just click confirm. (Because the app runs as a background agent, it
+won't appear in the System Settings → Default web browser dropdown, so this
+prompt is how it's set.)
 
 ## Configure
 

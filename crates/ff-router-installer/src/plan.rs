@@ -67,6 +67,14 @@ pub fn build(root: &Path, home: &Path, config: String) -> Vec<Action> {
             program: LSREGISTER.into(),
             args: vec!["-f".into(), installed.to_string_lossy().into_owned()],
         },
+        Action::Run {
+            label: "Request to become your default browser (macOS will ask you to confirm)".into(),
+            program: installed
+                .join("Contents/MacOS/ff-router")
+                .to_string_lossy()
+                .into_owned(),
+            args: vec!["--set-default".into()],
+        },
         Action::RemoveArtifacts {
             root: root.to_path_buf(),
             dist: root.join("dist"),
@@ -212,7 +220,7 @@ mod tests {
     #[test]
     fn builds_expected_plan() {
         let actions = build(Path::new("/repo"), Path::new("/home/u"), "cfg".into());
-        assert_eq!(actions.len(), 5);
+        assert_eq!(actions.len(), 6);
         assert!(matches!(actions[0], Action::WriteFile { .. }));
         assert!(actions[0].summary().contains(".ff-router.toml"));
         assert!(matches!(actions[1], Action::MoveInto { .. }));
@@ -221,7 +229,9 @@ mod tests {
         assert!(actions[2].summary().contains("chmod 755"));
         assert!(matches!(actions[3], Action::Run { .. }));
         assert!(actions[3].detail().starts_with("$ "));
-        assert!(matches!(actions[4], Action::RemoveArtifacts { .. }));
+        assert!(matches!(actions[4], Action::Run { .. }));
+        assert!(actions[4].summary().contains("default browser"));
+        assert!(matches!(actions[5], Action::RemoveArtifacts { .. }));
     }
 
     #[test]
