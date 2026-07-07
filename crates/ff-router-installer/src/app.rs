@@ -201,8 +201,8 @@ impl Wizard {
 
         let lines = vec![
             Line::from("Space-separated glob patterns to open in this profile."),
-            Line::from("Examples:  *://*.atlassian.net/*   *partly.com/*   *.{slack,notion}.com/*"),
-            Line::from("Leave blank to skip this profile."),
+            Line::from("Examples:  *://*.atlassian.net/*   *partly.com/*   *://github.com/partly*"),
+            Line::from("Leave blank to skip this profile. ('*' matches any run of characters.)"),
         ];
         frame.render_widget(
             Paragraph::new(lines).wrap(Wrap { trim: false }).block(

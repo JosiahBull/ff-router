@@ -337,7 +337,7 @@ mod tests {
         profile = "work"
         globs = [
             "*://*.atlassian.net/*",
-            "*.{slack,notion}.com/*",
+            "*.slack.com/*",
         ]
 
         [[rule]]
