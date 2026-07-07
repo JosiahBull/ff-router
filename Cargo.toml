@@ -1,0 +1,23 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+authors = ["Josiah Bull <jo@partly.com>"]
+repository = "https://github.com/JosiahBull/firefox-link-router"
+
+# Dependencies shared across workspace crates. Reference from a crate with
+# `some-dep = { workspace = true }`.
+[workspace.dependencies]
+
+# Lints applied to every crate that opts in via `[lints] workspace = true`.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
