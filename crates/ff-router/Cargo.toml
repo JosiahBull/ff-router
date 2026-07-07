@@ -15,6 +15,8 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+toml = { version = "1.1.2", default-features = false, features = ["parse", "serde"] }
 
 # macOS-only: register as default browser and receive clicked URLs.
 [target.'cfg(target_os = "macos")'.dependencies]
