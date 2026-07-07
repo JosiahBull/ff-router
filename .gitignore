@@ -2,8 +2,8 @@
 **/*.rs.bk
 *.pdb
 
-# Assembled app bundle (produced by `make bundle`)
-/*.app
+# Assembled app bundle (produced by scripts/package.sh)
+/dist
 
 # Editor / OS cruft
 .DS_Store

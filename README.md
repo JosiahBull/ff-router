@@ -8,14 +8,27 @@ matching `--profile`.
 ## Install
 
 ```sh
-make install
+./scripts/install.sh
 ```
 
-This builds a release binary, wraps it in `Firefox Router.app`, installs it to
-`~/Applications`, and registers it with Launch Services. Then set it as the
-default browser:
+This builds a size-optimised release binary (~480 KB), wraps it in
+`Firefox Router.app`, installs it to `~/Applications`, and registers it with
+Launch Services. Then set it as the default browser:
 
 **System Settings → Desktop & Dock → Default web browser → Firefox Router**
+
+| Script | Purpose |
+| --- | --- |
+| `scripts/build.sh` | Build the optimised release binary into `target/<triple>/release/` |
+| `scripts/package.sh` | Build + assemble the signed `dist/Firefox Router.app` |
+| `scripts/install.sh` | Package + install to `~/Applications` + register |
+| `scripts/uninstall.sh` | Remove and deregister the installed app |
+
+The build uses nightly `build-std` with `panic=immediate-abort` plus
+`opt-level=z` + LTO + strip (see `Cargo.toml` and `scripts/build.sh`). It stays
+a small static binary — no launch-time decompression — so startup is fast and
+resident memory is minimal. The pinned nightly toolchain is in
+`rust-toolchain.toml`.
 
 ## Configure
 

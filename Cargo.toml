@@ -18,3 +18,14 @@ repository = "https://github.com/JosiahBull/firefox-link-router"
 # `unsafe_code` is not forbidden: the macOS URL handling requires objc2 FFI.
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# Aggressively minimise the release binary (disk + resident memory) while
+# keeping startup fast (static, no launch-time decompression).
+# `scripts/build.sh` layers nightly `build-std` + `panic_immediate_abort` on top.
+[profile.release]
+opt-level = "z"     # optimise for size
+lto = true          # cross-crate inlining + dead-code elimination
+codegen-units = 1   # maximise optimisation (at the cost of compile time)
+panic = "abort"     # drop unwinding tables and landing pads
+strip = true        # remove symbols and debug info
+debug = false
