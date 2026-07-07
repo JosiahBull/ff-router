@@ -11,7 +11,7 @@ matching `--profile`.
 ./scripts/install.sh
 ```
 
-This builds a size-optimised release binary (~480 KB), wraps it in
+This builds a size-optimised release binary (~104 KB), wraps it in
 `Firefox Router.app`, installs it to `~/Applications`, and registers it with
 Launch Services. Then set it as the default browser:
 

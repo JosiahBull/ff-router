@@ -15,9 +15,6 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-globset = "0.4.18"
-serde = { version = "1.0.228", features = ["derive"] }
-toml = "1.1.2"
 
 # macOS-only: register as default browser and receive clicked URLs.
 [target.'cfg(target_os = "macos")'.dependencies]

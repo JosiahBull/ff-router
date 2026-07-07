@@ -6,6 +6,7 @@
 //! against the config, then re-launch Firefox with the chosen `--profile`.
 
 mod config;
+mod glob;
 
 use std::process::Command;
 
