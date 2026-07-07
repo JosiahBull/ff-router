@@ -10,13 +10,10 @@ use config::Config;
 
 const FIREFOX: &str = "/Applications/Firefox.app/Contents/MacOS/firefox";
 
-/// Bundle identifier declared in the app's Info.plist.
-const BUNDLE_ID: &str = "com.josiahbull.ff-router";
-
 fn main() {
     match std::env::args().nth(1).as_deref() {
         // Ask macOS to make us the default browser (triggers the system prompt).
-        Some("--set-default") => macos::set_default_browser(BUNDLE_ID),
+        Some("--set-default") => macos::set_default_browser(),
         // Direct invocation with a URL (terminal use / testing) skips AppKit.
         Some(url) if url.starts_with("http://") || url.starts_with("https://") => launch(url),
         _ => macos::run(),
@@ -35,39 +32,46 @@ fn launch(url: &str) {
 }
 
 mod macos {
-    use std::ffi::c_void;
-
+    use block2::RcBlock;
     use objc2::rc::Retained;
     use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
     use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send};
-    use objc2_app_kit::{NSApplication, NSApplicationDelegate};
-    use objc2_foundation::{NSArray, NSString, NSURL};
+    use objc2_app_kit::{NSApplication, NSApplicationDelegate, NSWorkspace};
+    use objc2_foundation::{NSArray, NSBundle, NSError, NSString, NSURL};
 
-    // LaunchServices C API. Setting the http/https handler for a web browser
-    // prompts the user with the system "change default browser?" dialog. It is
-    // deprecated but still functional (the same call the `defaultbrowser` CLI
-    // uses); `NSString` is toll-free bridged to the expected `CFStringRef`.
-    #[link(name = "CoreServices", kind = "framework")]
-    unsafe extern "C" {
-        fn LSSetDefaultHandlerForURLScheme(scheme: *const c_void, bundle_id: *const c_void) -> i32;
-    }
+    /// Ask macOS to make this app the default browser. Uses the async
+    /// `NSWorkspace` API (macOS 12+), which shows the system "change your
+    /// default web browser?" prompt. Setting the `http` handler is what defines
+    /// the default browser and `https` follows it, so we set only `http`.
+    ///
+    /// The change is applied after the user responds, so we stay alive on the
+    /// run loop and exit from the completion handler (setting both schemes at
+    /// once or exiting early makes the change fail or revert).
+    pub fn set_default_browser() {
+        let mtm = MainThreadMarker::new().expect("main thread");
+        let app = NSApplication::sharedApplication(mtm);
+        let workspace = NSWorkspace::sharedWorkspace();
+        let bundle_url = NSBundle::mainBundle().bundleURL();
+        let scheme = NSString::from_str("http");
 
-    /// Ask macOS to make the app with `bundle_id` the default browser.
-    pub fn set_default_browser(bundle_id: &str) {
-        let bundle = NSString::from_str(bundle_id);
-        for scheme in ["http", "https"] {
-            let scheme_str = NSString::from_str(scheme);
-            let status = unsafe {
-                LSSetDefaultHandlerForURLScheme(
-                    Retained::as_ptr(&scheme_str).cast::<c_void>(),
-                    Retained::as_ptr(&bundle).cast::<c_void>(),
-                )
-            };
-            if status != 0 {
-                eprintln!("could not set the {scheme} handler (LaunchServices status {status})");
+        let completion = RcBlock::new(|error: *mut NSError| {
+            if let Some(error) = unsafe { error.as_ref() } {
+                eprintln!(
+                    "could not set default browser: {}",
+                    error.localizedDescription()
+                );
+            } else {
+                println!("Default browser updated.");
             }
-        }
-        println!("Requested default-browser change — confirm the macOS prompt if it appears.");
+            std::process::exit(0);
+        });
+
+        workspace.setDefaultApplicationAtURL_toOpenURLsWithScheme_completionHandler(
+            &bundle_url,
+            &scheme,
+            Some(&completion),
+        );
+        app.run();
     }
 
     define_class!(

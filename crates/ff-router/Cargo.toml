@@ -19,15 +19,20 @@ workspace = true
 # macOS-only: register as default browser and receive clicked URLs.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
+block2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
     "std",
+    "block2",
     "NSApplication",
     "NSResponder",
+    "NSWorkspace",
 ] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = [
     "std",
     "NSArray",
+    "NSBundle",
     "NSEnumerator",
+    "NSError",
     "NSString",
     "NSURL",
 ] }
