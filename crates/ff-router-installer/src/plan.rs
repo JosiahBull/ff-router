@@ -8,11 +8,28 @@ use std::process::{Command, ExitStatus, Stdio};
 const APP: &str = "Firefox Router.app";
 const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 const BUNDLE_ID: &str = "com.josiahbull.ff-router";
+/// GitHub `owner/repo` the release binaries are published under.
+const REPO: &str = "josiahbull/ff-router";
+/// The bundle's `Info.plist`, baked in at compile time so the installer can
+/// assemble the app without a repo checkout on the user's machine.
+const INFO_PLIST: &str = include_str!("../../../Info.plist");
+
+/// Where the `ff-router` executable comes from when assembling the app bundle.
+#[derive(Clone)]
+pub enum AppSource {
+    /// Download the matching release asset from GitHub (the normal path).
+    Download { version: String },
+    /// Use a locally-built binary instead of downloading (dev; `FF_ROUTER_BIN`).
+    Local { binary: PathBuf },
+}
 
 /// A single install step.
 pub enum Action {
     /// Write text to a file (the config).
     WriteFile { path: PathBuf, contents: String },
+    /// Obtain `ff-router` (download or copy) and assemble a signed
+    /// `Firefox Router.app` inside `staging`.
+    FetchApp { source: AppSource, staging: PathBuf },
     /// Move a directory into `dir` (the app bundle into ~/Applications).
     MoveInto { from: PathBuf, dir: PathBuf },
     /// Set the executable bit on a file.
@@ -26,8 +43,11 @@ pub enum Action {
     /// Write a LaunchAgent plist and (re)load it, so the resident router starts
     /// at login (and immediately) and links are routed by a warm process.
     InstallLoginItem { plist: PathBuf, contents: String },
-    /// Remove the build artifacts (dist/ and target/).
-    RemoveArtifacts { root: PathBuf, dist: PathBuf },
+}
+
+/// The URL of the `ff-router` release asset for a given version.
+fn download_url(version: &str) -> String {
+    format!("https://github.com/{REPO}/releases/download/v{version}/ff-router")
 }
 
 /// Whether an action's target already exists, and if it can be diffed.
@@ -49,9 +69,9 @@ pub struct Decided {
     pub apply: bool,
 }
 
-/// Build the plan. The app bundle is expected to already exist in `dist/`
-/// (scripts/install.sh builds it before launching the installer).
-pub fn build(root: &Path, home: &Path, config: String) -> Vec<Action> {
+/// Build the plan. The app bundle is fetched and assembled into `staging` by
+/// the [`Action::FetchApp`] step before it is moved into ~/Applications.
+pub fn build(source: AppSource, home: &Path, config: String, staging: &Path) -> Vec<Action> {
     let apps = home.join("Applications");
     let installed = apps.join(APP);
     vec![
@@ -59,8 +79,12 @@ pub fn build(root: &Path, home: &Path, config: String) -> Vec<Action> {
             path: home.join(".ff-router.toml"),
             contents: config,
         },
+        Action::FetchApp {
+            source,
+            staging: staging.to_path_buf(),
+        },
         Action::MoveInto {
-            from: root.join("dist").join(APP),
+            from: staging.join(APP),
             dir: apps,
         },
         Action::MakeExecutable {
@@ -85,10 +109,6 @@ pub fn build(root: &Path, home: &Path, config: String) -> Vec<Action> {
                 .into_owned(),
             args: vec!["--set-default".into()],
         },
-        Action::RemoveArtifacts {
-            root: root.to_path_buf(),
-            dist: root.join("dist"),
-        },
     ]
 }
 
@@ -99,6 +119,14 @@ impl Action {
             Action::WriteFile { path, .. } => {
                 format!("Write the configuration to {}", home_relative(path))
             }
+            Action::FetchApp { source, .. } => match source {
+                AppSource::Download { version } => {
+                    format!("Download Firefox Router {version} from GitHub and assemble the app")
+                }
+                AppSource::Local { .. } => {
+                    "Assemble Firefox Router.app from the local build".into()
+                }
+            },
             Action::MoveInto { from, dir } => format!(
                 "Move {} into {}",
                 from.file_name().unwrap_or_default().to_string_lossy(),
@@ -114,7 +142,6 @@ impl Action {
             Action::InstallLoginItem { .. } => {
                 "Start the router at login so links open instantly (install a LaunchAgent)".into()
             }
-            Action::RemoveArtifacts { .. } => "Remove build artifacts (dist/ and target/)".into(),
         }
     }
 
@@ -128,6 +155,12 @@ impl Action {
                     contents.lines().count()
                 )
             }
+            Action::FetchApp { source, staging } => match source {
+                AppSource::Download { version } => download_url(version),
+                AppSource::Local { binary } => {
+                    format!("{}  →  {}", home_relative(binary), home_relative(staging))
+                }
+            },
             Action::MoveInto { from, dir } => {
                 format!("{}  →  {}", home_relative(from), home_relative(dir))
             }
@@ -135,13 +168,6 @@ impl Action {
             Action::Run { program, args, .. } => format!("$ {program} {}", args.join(" ")),
             Action::InstallLoginItem { plist, .. } => {
                 format!("launchctl bootstrap gui/$UID {}", home_relative(plist))
-            }
-            Action::RemoveArtifacts { dist, root } => {
-                format!(
-                    "rm -rf {} && cargo clean in {}",
-                    home_relative(dist),
-                    home_relative(root)
-                )
             }
         }
     }
@@ -180,6 +206,7 @@ impl Action {
                 }
                 std::fs::write(path, contents)
             }
+            Action::FetchApp { source, staging } => fetch_app(source, staging),
             Action::MoveInto { from, dir } => {
                 std::fs::create_dir_all(dir)?;
                 let target = dir.join(from.file_name().unwrap_or_default());
@@ -195,16 +222,50 @@ impl Action {
                 std::fs::write(plist, contents)?;
                 load_login_item(plist)
             }
-            Action::RemoveArtifacts { root, dist } => {
-                let _ = std::fs::remove_dir_all(dist);
-                let _ = Command::new("cargo")
-                    .arg("clean")
-                    .current_dir(root)
-                    .status();
-                Ok(())
-            }
         }
     }
+}
+
+/// Obtain the `ff-router` binary (download or copy) and assemble a signed
+/// `Firefox Router.app` inside `staging`, mirroring `scripts/package.sh`.
+fn fetch_app(source: &AppSource, staging: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(staging)?;
+    let raw = staging.join("ff-router");
+    match source {
+        AppSource::Local { binary } => {
+            std::fs::copy(binary, &raw)?;
+        }
+        AppSource::Download { version } => {
+            // Shell out to curl (always present on macOS) rather than pull in a
+            // TLS stack; `-fsSL` fails on HTTP errors and follows the redirect
+            // GitHub serves for release assets.
+            check(
+                Command::new("curl")
+                    .args(["-fsSL", "--retry", "3", "-o"])
+                    .arg(&raw)
+                    .arg(download_url(version))
+                    .status()?,
+            )?;
+        }
+    }
+
+    let bundle = staging.join(APP);
+    let _ = std::fs::remove_dir_all(&bundle);
+    let macos = bundle.join("Contents/MacOS");
+    std::fs::create_dir_all(&macos)?;
+    std::fs::write(bundle.join("Contents/Info.plist"), INFO_PLIST)?;
+    let exe = macos.join("ff-router");
+    std::fs::copy(&raw, &exe)?;
+    set_executable(&exe)?;
+    std::fs::write(bundle.join("Contents/PkgInfo"), "APPL????")?;
+
+    // Ad-hoc sign so macOS treats the freshly-assembled bundle as valid.
+    check(
+        Command::new("codesign")
+            .args(["--force", "--sign", "-"])
+            .arg(&bundle)
+            .status()?,
+    )
 }
 
 #[cfg(unix)]
@@ -337,22 +398,56 @@ mod tests {
 
     #[test]
     fn builds_expected_plan() {
-        let actions = build(Path::new("/repo"), Path::new("/home/u"), "cfg".into());
+        let source = AppSource::Download {
+            version: "1.2.3".into(),
+        };
+        let actions = build(
+            source,
+            Path::new("/home/u"),
+            "cfg".into(),
+            Path::new("/stage"),
+        );
         assert_eq!(actions.len(), 7);
         assert!(matches!(actions[0], Action::WriteFile { .. }));
         assert!(actions[0].summary().contains(".ff-router.toml"));
-        assert!(matches!(actions[1], Action::MoveInto { .. }));
-        assert!(actions[1].summary().contains("Firefox Router.app"));
-        assert!(matches!(actions[2], Action::MakeExecutable { .. }));
-        assert!(actions[2].summary().contains("chmod 755"));
-        assert!(matches!(actions[3], Action::Run { .. }));
-        assert!(actions[3].detail().starts_with("$ "));
-        assert!(matches!(actions[4], Action::InstallLoginItem { .. }));
-        assert!(actions[4].summary().contains("login"));
-        assert!(actions[4].detail().contains("launchctl bootstrap"));
-        assert!(matches!(actions[5], Action::Run { .. }));
-        assert!(actions[5].summary().contains("default browser"));
-        assert!(matches!(actions[6], Action::RemoveArtifacts { .. }));
+        assert!(matches!(actions[1], Action::FetchApp { .. }));
+        assert!(
+            actions[1]
+                .summary()
+                .contains("Download Firefox Router 1.2.3")
+        );
+        assert!(
+            actions[1]
+                .detail()
+                .contains("releases/download/v1.2.3/ff-router")
+        );
+        assert!(matches!(actions[2], Action::MoveInto { .. }));
+        assert!(actions[2].summary().contains("Firefox Router.app"));
+        // The bundle is moved out of the staging dir, not the old dist/.
+        assert!(actions[2].detail().contains("/stage/Firefox Router.app"));
+        assert!(matches!(actions[3], Action::MakeExecutable { .. }));
+        assert!(actions[3].summary().contains("chmod 755"));
+        assert!(matches!(actions[4], Action::Run { .. }));
+        assert!(actions[4].detail().starts_with("$ "));
+        assert!(matches!(actions[5], Action::InstallLoginItem { .. }));
+        assert!(actions[5].summary().contains("login"));
+        assert!(actions[5].detail().contains("launchctl bootstrap"));
+        assert!(matches!(actions[6], Action::Run { .. }));
+        assert!(actions[6].summary().contains("default browser"));
+    }
+
+    #[test]
+    fn local_source_summary_mentions_local_build() {
+        let source = AppSource::Local {
+            binary: PathBuf::from("/tmp/ff-router"),
+        };
+        let actions = build(
+            source,
+            Path::new("/home/u"),
+            "cfg".into(),
+            Path::new("/stage"),
+        );
+        assert!(actions[1].summary().contains("local build"));
     }
 
     #[test]

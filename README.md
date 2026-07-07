@@ -8,8 +8,16 @@ matching `--profile`.
 ## Install
 
 ```sh
-./scripts/install.sh
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/josiahbull/ff-router/main/scripts/install.sh)"
 ```
+
+Building from a local checkout instead:
+
+```sh
+./scripts/dev-install.sh
+```
+
+[release]: https://github.com/josiahbull/ff-router/releases/latest
 
 ## Configure
 

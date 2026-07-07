@@ -1,8 +1,10 @@
 //! Interactive TUI installer for firefox-link-router.
 //!
 //! Discovers Firefox profiles, walks you through building `~/.ff-router.toml`,
-//! then steps through the install plan action-by-action. The app bundle is
-//! built up front by `scripts/install.sh` before this runs.
+//! then steps through the install plan action-by-action. The `ff-router`
+//! binary is downloaded from the matching GitHub release (or taken from a
+//! local build via `FF_ROUTER_BIN`) and assembled into the app bundle as one
+//! of the plan's steps — no repo checkout required.
 
 mod app;
 mod config;
@@ -12,12 +14,11 @@ mod glob_help;
 mod plan;
 
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use app::{Outcome, Wizard};
-
-const APP_BUNDLE: &str = "Firefox Router.app";
+use plan::AppSource;
 
 fn main() -> ExitCode {
     let profiles = discover::discover();
@@ -37,23 +38,27 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let root = repo_root();
-    if !root.join("dist").join(APP_BUNDLE).exists() {
-        eprintln!(
-            "The app bundle isn't built. Run ./scripts/install.sh (it builds everything first)."
-        );
-        return ExitCode::FAILURE;
-    }
+    let source = match app_source() {
+        Ok(source) => source,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         eprintln!("The installer needs an interactive terminal (run it directly, not piped).");
         return ExitCode::FAILURE;
     }
 
+    // Assemble the bundle in a throwaway staging dir; it's cleaned up after the
+    // plan runs (the .app is moved out into ~/Applications).
+    let staging = std::env::temp_dir().join(format!("ff-router-install-{}", std::process::id()));
+
     let mut terminal = ratatui::init();
-    let outcome = Wizard::new(profiles, root).run(&mut terminal);
+    let outcome = Wizard::new(profiles, source, staging.clone()).run(&mut terminal);
     ratatui::restore();
 
-    match outcome {
+    let code = match outcome {
         Ok(Outcome::Install { plan, warnings }) => execute(&plan, &warnings),
         Ok(Outcome::Cancelled) => {
             println!("Cancelled — nothing was changed.");
@@ -63,6 +68,26 @@ fn main() -> ExitCode {
             eprintln!("error: {e}");
             ExitCode::FAILURE
         }
+    };
+    let _ = std::fs::remove_dir_all(&staging);
+    code
+}
+
+/// Decide where `ff-router` comes from: a local build when `FF_ROUTER_BIN`
+/// points at one (for development), otherwise the release matching this
+/// installer's own version.
+fn app_source() -> Result<AppSource, String> {
+    match std::env::var_os("FF_ROUTER_BIN") {
+        Some(path) if Path::new(&path).is_file() => Ok(AppSource::Local {
+            binary: PathBuf::from(path),
+        }),
+        Some(path) => Err(format!(
+            "FF_ROUTER_BIN is set but is not a file: {}",
+            path.to_string_lossy()
+        )),
+        None => Ok(AppSource::Download {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }),
     }
 }
 
@@ -109,17 +134,4 @@ fn red(s: &str) -> String {
     } else {
         s.to_string()
     }
-}
-
-/// Locate the repo root by walking up from the executable until we find the
-/// packaging script; fall back to the current directory.
-fn repo_root() -> PathBuf {
-    if let Ok(exe) = std::env::current_exe() {
-        for ancestor in exe.ancestors() {
-            if ancestor.join("scripts/package.sh").is_file() {
-                return ancestor.to_path_buf();
-            }
-        }
-    }
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }

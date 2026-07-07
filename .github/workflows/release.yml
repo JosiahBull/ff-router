@@ -1,0 +1,128 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Verify the pushed tag matches every version we ship. Member crates use
+  # `version.workspace = true` (aligned by construction), but the workspace
+  # version and the hand-maintained Info.plist can drift, so check both.
+  version-check:
+    name: Verify tag matches declared versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check every declared version matches the tag
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          fail=0
+
+          check() {
+            if [ "$2" != "${tag}" ]; then
+              echo "::error::$1: '$2' does not match tag '${tag}'"
+              fail=1
+            else
+              echo "ok  $1: $2"
+            fi
+          }
+
+          ws=$(awk '/^\[workspace\.package\]/{f=1; next} f && /^version = /{gsub(/"/, "", $3); print $3; exit}' Cargo.toml)
+          check "workspace.package" "${ws}"
+
+          for key in CFBundleShortVersionString CFBundleVersion; do
+            v=$(awk -v k="${key}" '$0 ~ "<key>"k"</key>"{getline; gsub(/.*<string>|<\/string>.*/, ""); print; exit}' Info.plist)
+            check "Info.plist ${key}" "${v}"
+          done
+
+          exit "${fail}"
+
+  # Build both binaries as universal (arm64 + x86_64) so the release runs on any
+  # Mac. macOS runner required: ff-router links AppKit via objc2.
+  build:
+    name: Build universal macOS binaries
+    needs: [version-check]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+
+      # ff-router is built with `build-std` (needs rust-src); the installer
+      # cross-compiles to Intel with the prebuilt std (needs the added target).
+      # The toolchain (nightly) itself comes from rust-toolchain.toml.
+      - name: Provision toolchain components and targets
+        run: |
+          rustup component add rust-src
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      # scripts/build.sh applies the size-optimised build-std flags for the
+      # TARGET we pass, so the released binary matches a local build exactly.
+      - name: Build ff-router (size-optimised, universal)
+        run: |
+          TARGET=aarch64-apple-darwin scripts/build.sh
+          TARGET=x86_64-apple-darwin scripts/build.sh
+          mkdir -p dist
+          lipo -create -output dist/ff-router \
+            target/aarch64-apple-darwin/release/ff-router \
+            target/x86_64-apple-darwin/release/ff-router
+          lipo -info dist/ff-router
+
+      - name: Build ff-router-installer (universal)
+        run: |
+          cargo build -p ff-router-installer --release --target aarch64-apple-darwin
+          cargo build -p ff-router-installer --release --target x86_64-apple-darwin
+          lipo -create -output dist/ff-router-installer \
+            target/aarch64-apple-darwin/release/ff-router-installer \
+            target/x86_64-apple-darwin/release/ff-router-installer
+          lipo -info dist/ff-router-installer
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: |
+            dist/ff-router
+            dist/ff-router-installer
+          if-no-files-found: error
+
+  # Sequenced after the build so the release page never advertises a tag whose
+  # binaries failed to build. Asset names must stay `ff-router` and
+  # `ff-router-installer` — scripts/install.sh and the installer download them
+  # by those exact names.
+  github-release:
+    name: Create GitHub release
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # --generate-notes walks back to the previous release tag.
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag \
+            dist/ff-router dist/ff-router-installer

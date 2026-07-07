@@ -14,6 +14,7 @@ use ratatui::{DefaultTerminal, Frame};
 
 use crate::discover::Profile;
 use crate::glob_help::{self, Kind};
+use crate::plan::AppSource;
 use crate::{config, diff, plan};
 
 /// Colours for the glob preview: `*`/`?`, `[...]`/`{a,b}`, `\` escapes, and the
@@ -55,7 +56,8 @@ enum Step {
 }
 
 pub struct Wizard {
-    root: PathBuf,
+    source: AppSource,
+    staging: PathBuf,
     profiles: Vec<Profile>,
     globs: Vec<String>, // parallel to `profiles`
     default_idx: usize,
@@ -82,12 +84,13 @@ pub struct Wizard {
 }
 
 impl Wizard {
-    pub fn new(profiles: Vec<Profile>, root: PathBuf) -> Self {
+    pub fn new(profiles: Vec<Profile>, source: AppSource, staging: PathBuf) -> Self {
         let globs = vec![String::new(); profiles.len()];
         let mut list = ListState::default();
         list.select(Some(0));
         Self {
-            root,
+            source,
+            staging,
             profiles,
             globs,
             default_idx: 0,
@@ -275,7 +278,7 @@ impl Wizard {
             .map(PathBuf::from)
             .unwrap_or_default();
         self.warnings = config::glob_warnings(&self.globs);
-        self.actions = plan::build(&self.root, &home, self.config());
+        self.actions = plan::build(self.source.clone(), &home, self.config(), &self.staging);
         self.plan_pos = 0;
         self.decisions = Vec::new();
         self.enter_action();
@@ -597,7 +600,10 @@ mod tests {
     fn on_globs_step() -> Wizard {
         let mut wizard = Wizard::new(
             vec![profile("Home"), profile("Work")],
-            PathBuf::from("/repo"),
+            AppSource::Download {
+                version: "0.0.0".into(),
+            },
+            PathBuf::from("/stage"),
         );
         wizard.confirm_default(); // default = Home (index 0); now editing Work
         assert!(matches!(wizard.step, Step::Globs));

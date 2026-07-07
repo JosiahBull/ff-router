@@ -6,12 +6,12 @@ members = ["crates/*"]
 default-members = ["crates/ff-router"]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 authors = ["Josiah Bull <jo@partly.com>"]
-repository = "https://github.com/JosiahBull/firefox-link-router"
+repository = "https://github.com/josiahbull/ff-router"
 
 # Dependencies shared across workspace crates. Reference from a crate with
 # `some-dep = { workspace = true }`.
