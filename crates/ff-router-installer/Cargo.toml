@@ -1,0 +1,20 @@
+[package]
+name = "ff-router-installer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ff-router-installer"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+# A throwaway interactive installer. Heavy on purpose (full-screen TUI); it is
+# built on demand and removes its own artifacts once it finishes.
+[dependencies]
+ratatui = "0.29"

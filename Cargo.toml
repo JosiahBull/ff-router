@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# Casual `cargo build`/`test` only touch the shipped binary; the heavy installer
+# is built on demand with `-p ff-router-installer`. CI uses `--workspace`.
+default-members = ["crates/ff-router"]
 
 [workspace.package]
 version = "0.1.0"

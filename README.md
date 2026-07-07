@@ -11,29 +11,16 @@ matching `--profile`.
 ./scripts/install.sh
 ```
 
-This builds a size-optimised release binary (~104 KB), wraps it in
-`Firefox Router.app`, installs it to `~/Applications`, and registers it with
-Launch Services. Then set it as the default browser:
-
-**System Settings → Desktop & Dock → Default web browser → Firefox Router**
-
-| Script | Purpose |
-| --- | --- |
-| `scripts/build.sh` | Build the optimised release binary into `target/<triple>/release/` |
-| `scripts/package.sh` | Build + assemble the signed `dist/Firefox Router.app` |
-| `scripts/install.sh` | Package + install to `~/Applications` + register |
-| `scripts/uninstall.sh` | Remove and deregister the installed app |
-| `scripts/clean.sh` | Remove build artifacts (`target/` and `dist/`) |
-
-The build uses nightly `build-std` with `panic=immediate-abort` plus
-`opt-level=z` + LTO + strip (see `Cargo.toml` and `scripts/build.sh`). It stays
-a small static binary — no launch-time decompression — so startup is fast and
-resident memory is minimal. The pinned nightly toolchain is in
-`rust-toolchain.toml`.
+This builds and launches an interactive terminal wizard (the `ff-router-installer`
+crate) that discovers your Firefox profiles, walks you through building
+`~/.ff-router.toml`, installs `Firefox Router.app` into `~/Applications`, and
+then removes its own build artifacts. Afterwards, set it as the default browser
+in **System Settings → Desktop & Dock → Default web browser**.
 
 ## Configure
 
-Copy the example and edit it:
+The installer writes `~/.ff-router.toml` for you. To create or edit it by hand
+instead, copy the example:
 
 ```sh
 cp .ff-router.toml.example ~/.ff-router.toml

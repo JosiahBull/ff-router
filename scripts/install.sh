@@ -1,17 +1,8 @@
 #!/usr/bin/env bash
-# Package, install to ~/Applications, and register with Launch Services.
+# Build and launch the interactive TUI installer. It discovers your Firefox
+# profiles, helps you write ~/.ff-router.toml, installs "Firefox Router.app",
+# and then removes its own build artifacts.
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-"${REPO_ROOT}/scripts/package.sh"
-
-mkdir -p "${DEST}"
-rm -rf "${DEST:?}/${APP}"
-cp -R "${DIST}/${APP}" "${DEST}/${APP}"
-"${LSREGISTER}" -f "${DEST}/${APP}"
-
-cat <<EOF
-
-Installed ${DEST}/${APP}
-Now set it as your default browser:
-  System Settings > Desktop & Dock > Default web browser > ${APP_NAME}
-EOF
+cargo build -p ff-router-installer
+exec "${REPO_ROOT}/target/debug/ff-router-installer" "$@"
