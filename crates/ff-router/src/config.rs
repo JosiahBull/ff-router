@@ -54,6 +54,7 @@ impl Config {
                     GlobBuilder::new(g)
                         .literal_separator(false) // `*`/`?` cross `/` — URLs, not paths
                         .backslash_escape(true) // treat `\?`, `\*`, `\[` … as literals
+                        .case_insensitive(true) // URLs are case-insensitive (e.g. `http://example.com` vs `HTTP://EXAMPLE.COM`)
                         .build()
                         .map(|glob| glob.compile_matcher().is_match(url))
                         .unwrap_or(false)
