@@ -1,21 +1,23 @@
 //! The full-screen wizard: pick the default profile, enter globs per other
-//! profile, review the generated config.
+//! profile, review the config, then step through the install plan
+//! action-by-action (with a diff-powered conflict resolver).
 
 use std::io;
+use std::path::PathBuf;
 
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 
-use crate::config;
 use crate::discover::Profile;
+use crate::{config, diff, plan};
 
 pub enum Outcome {
     Install {
-        config: String,
+        plan: Vec<plan::Decided>,
         warnings: Vec<String>,
     },
     Cancelled,
@@ -25,9 +27,11 @@ enum Step {
     Default,
     Globs,
     Review,
+    Plan,
 }
 
 pub struct Wizard {
+    root: PathBuf,
     profiles: Vec<Profile>,
     globs: Vec<String>, // parallel to `profiles`
     default_idx: usize,
@@ -38,17 +42,28 @@ pub struct Wizard {
     input: Vec<char>,
     cursor: usize,
     review_scroll: u16,
-    // Set during rendering so key handling can clamp/page correctly.
     review_max_scroll: u16,
     review_page: u16,
+    // Plan phase.
+    actions: Vec<plan::Action>,
+    plan_pos: usize,
+    decisions: Vec<bool>,
+    warnings: Vec<String>,
+    conflict: plan::Conflict,
+    diff_lines: Vec<Line<'static>>,
+    diff_open: bool,
+    diff_scroll: u16,
+    diff_max_scroll: u16,
+    diff_page: u16,
 }
 
 impl Wizard {
-    pub fn new(profiles: Vec<Profile>) -> Self {
+    pub fn new(profiles: Vec<Profile>, root: PathBuf) -> Self {
         let globs = vec![String::new(); profiles.len()];
         let mut list = ListState::default();
         list.select(Some(0));
         Self {
+            root,
             profiles,
             globs,
             default_idx: 0,
@@ -61,6 +76,16 @@ impl Wizard {
             review_scroll: 0,
             review_max_scroll: 0,
             review_page: 1,
+            actions: Vec::new(),
+            plan_pos: 0,
+            decisions: Vec::new(),
+            warnings: Vec::new(),
+            conflict: plan::Conflict::None,
+            diff_lines: Vec::new(),
+            diff_open: false,
+            diff_scroll: 0,
+            diff_max_scroll: 0,
+            diff_page: 1,
         }
     }
 
@@ -111,12 +136,7 @@ impl Wizard {
                 _ => {}
             },
             Step::Review => match key.code {
-                KeyCode::Enter | KeyCode::Char('y') => {
-                    return Some(Outcome::Install {
-                        config: self.config(),
-                        warnings: config::glob_warnings(&self.globs),
-                    });
-                }
+                KeyCode::Enter | KeyCode::Char('y') => self.start_plan(),
                 KeyCode::Char('b') => self.step = Step::Default,
                 KeyCode::Esc | KeyCode::Char('q') => return Some(Outcome::Cancelled),
                 KeyCode::Up | KeyCode::Char('k') => {
@@ -136,8 +156,49 @@ impl Wizard {
                 KeyCode::End | KeyCode::Char('G') => self.review_scroll = self.review_max_scroll,
                 _ => {}
             },
+            Step::Plan => return self.handle_plan(key),
         }
         None
+    }
+
+    fn handle_plan(&mut self, key: KeyEvent) -> Option<Outcome> {
+        if self.diff_open {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => self.diff_open = false,
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.diff_scroll = self.diff_scroll.saturating_sub(1);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.diff_scroll = (self.diff_scroll + 1).min(self.diff_max_scroll);
+                }
+                KeyCode::PageUp => {
+                    self.diff_scroll = self.diff_scroll.saturating_sub(self.diff_page);
+                }
+                KeyCode::PageDown => {
+                    self.diff_scroll =
+                        (self.diff_scroll + self.diff_page).min(self.diff_max_scroll);
+                }
+                KeyCode::Home | KeyCode::Char('g') => self.diff_scroll = 0,
+                KeyCode::End | KeyCode::Char('G') => self.diff_scroll = self.diff_max_scroll,
+                _ => {}
+            }
+            return None;
+        }
+
+        let has_conflict = !matches!(self.conflict, plan::Conflict::None);
+        let can_compare = matches!(self.conflict, plan::Conflict::Text { .. });
+        match key.code {
+            KeyCode::Char('a') | KeyCode::Esc => Some(Outcome::Cancelled),
+            KeyCode::Char('s') => self.decide(false),
+            KeyCode::Char('c') if can_compare => {
+                self.diff_open = true;
+                self.diff_scroll = 0;
+                None
+            }
+            KeyCode::Char('r') if has_conflict => self.decide(true),
+            KeyCode::Enter | KeyCode::Char('y') if !has_conflict => self.decide(true),
+            _ => None,
+        }
     }
 
     fn move_selection(&mut self, delta: isize) {
@@ -185,6 +246,51 @@ impl Wizard {
         config::gen_config(&self.profiles, self.default_idx, &self.globs)
     }
 
+    fn start_plan(&mut self) {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        self.warnings = config::glob_warnings(&self.globs);
+        self.actions = plan::build(&self.root, &home, self.config());
+        self.plan_pos = 0;
+        self.decisions = Vec::new();
+        self.enter_action();
+        self.step = Step::Plan;
+    }
+
+    /// Prepare conflict info (and any diff) for the current action.
+    fn enter_action(&mut self) {
+        self.diff_open = false;
+        self.diff_scroll = 0;
+        self.conflict = self.actions[self.plan_pos].conflict();
+        self.diff_lines = match &self.conflict {
+            plan::Conflict::Text {
+                existing, proposed, ..
+            } => diff::lines(existing, proposed),
+            _ => Vec::new(),
+        };
+    }
+
+    /// Record a decision for the current action and advance; produce the final
+    /// outcome once every action has been decided.
+    fn decide(&mut self, apply: bool) -> Option<Outcome> {
+        self.decisions.push(apply);
+        self.plan_pos += 1;
+        if self.plan_pos < self.actions.len() {
+            self.enter_action();
+            return None;
+        }
+        let plan = std::mem::take(&mut self.actions)
+            .into_iter()
+            .zip(std::mem::take(&mut self.decisions))
+            .map(|(action, apply)| plan::Decided { action, apply })
+            .collect();
+        Some(Outcome::Install {
+            plan,
+            warnings: std::mem::take(&mut self.warnings),
+        })
+    }
+
     // --- rendering -------------------------------------------------------
 
     fn render(&mut self, frame: &mut Frame) {
@@ -194,20 +300,32 @@ impl Wizard {
             Step::Default => self.render_default(frame, body),
             Step::Globs => self.render_globs(frame, body),
             Step::Review => self.render_review(frame, body),
+            Step::Plan => self.render_plan(frame, body),
         }
-        // Computed after rendering the body so `review_max_scroll` is current.
-        let help = match self.step {
-            Step::Default => "↑/↓ move · Enter: set as default · q/Esc quit".to_string(),
-            Step::Globs => "type globs · Enter: next · Esc: back".to_string(),
-            Step::Review if self.review_max_scroll > 0 => {
-                "Enter/y: install · b: back · q/Esc: cancel · ↑/↓ j/k g/G: scroll".to_string()
-            }
-            Step::Review => "Enter/y: install · b: back · q/Esc: cancel".to_string(),
-        };
+        let help = self.help();
         frame.render_widget(
             Paragraph::new(help).block(Block::default().borders(Borders::ALL).title(" Keys ")),
             footer,
         );
+    }
+
+    fn help(&self) -> String {
+        match self.step {
+            Step::Default => "↑/↓ move · Enter: set as default · q/Esc quit".into(),
+            Step::Globs => "type globs · Enter: next · Esc: back".into(),
+            Step::Review if self.review_max_scroll > 0 => {
+                "Enter/y: install · b: back · q/Esc: cancel · ↑/↓ j/k g/G: scroll".into()
+            }
+            Step::Review => "Enter/y: install · b: back · q/Esc: cancel".into(),
+            Step::Plan if self.diff_open => "↑/↓ j/k g/G: scroll · Esc/Enter/q: close".into(),
+            Step::Plan => match &self.conflict {
+                plan::Conflict::None => "Enter: apply · s: skip · a/Esc: abort".into(),
+                plan::Conflict::Text { .. } => {
+                    "c: compare · r: replace · s: skip · a/Esc: abort".into()
+                }
+                plan::Conflict::Exists(_) => "r: replace · s: skip · a/Esc: abort".into(),
+            },
+        }
     }
 
     fn render_default(&mut self, frame: &mut Frame, area: Rect) {
@@ -277,7 +395,6 @@ impl Wizard {
             .borders(Borders::ALL)
             .title(" Review ~/.ff-router.toml ");
         if self.review_max_scroll > 0 {
-            // Directional hint: arrows show which way there is more to scroll.
             let up = if self.review_scroll > 0 { '↑' } else { ' ' };
             let down = if self.review_scroll < self.review_max_scroll {
                 '↓'
@@ -291,6 +408,80 @@ impl Wizard {
         frame.render_widget(
             Paragraph::new(config)
                 .scroll((self.review_scroll, 0))
+                .block(block),
+            area,
+        );
+    }
+
+    fn render_plan(&mut self, frame: &mut Frame, area: Rect) {
+        if self.diff_open {
+            self.render_diff(frame, area);
+            return;
+        }
+
+        let action = &self.actions[self.plan_pos];
+        let mut lines = vec![
+            Line::from(format!(
+                "Action {} of {}",
+                self.plan_pos + 1,
+                self.actions.len()
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("I am going to: "),
+                Span::styled(
+                    action.summary(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(format!("    {}", action.detail())),
+        ];
+        let target = match &self.conflict {
+            plan::Conflict::None => None,
+            plan::Conflict::Exists(p) | plan::Conflict::Text { path: p, .. } => Some(p),
+        };
+        if let Some(path) = target {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "⚠ {} already exists — choose what to do.",
+                    plan::home_relative(path)
+                ),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
+        frame.render_widget(
+            Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Install plan "),
+            ),
+            area,
+        );
+    }
+
+    fn render_diff(&mut self, frame: &mut Frame, area: Rect) {
+        let total = self.diff_lines.len() as u16;
+        let viewport = area.height.saturating_sub(2);
+        self.diff_page = viewport.max(1);
+        self.diff_max_scroll = total.saturating_sub(viewport);
+        self.diff_scroll = self.diff_scroll.min(self.diff_max_scroll);
+
+        let mut block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Compare  (–red existing · +green proposed) ");
+        if self.diff_max_scroll > 0 {
+            let up = if self.diff_scroll > 0 { '↑' } else { ' ' };
+            let down = if self.diff_scroll < self.diff_max_scroll {
+                '↓'
+            } else {
+                ' '
+            };
+            block = block.title_bottom(Line::from(format!(" more {up}{down} ")).right_aligned());
+        }
+        frame.render_widget(
+            Paragraph::new(Text::from(self.diff_lines.clone()))
+                .scroll((self.diff_scroll, 0))
                 .block(block),
             area,
         );

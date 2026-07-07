@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Build and launch the interactive TUI installer. It discovers your Firefox
-# profiles, helps you write ~/.ff-router.toml, installs "Firefox Router.app",
-# and then removes its own build artifacts.
+# Build everything up front, then launch the interactive installer. The TUI
+# walks through each install action (write config, move the bundle, set
+# permissions, register, clean up) and prompts before each one.
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-cargo build -p ff-router-installer
+cargo build -p ff-router-installer   # the installer TUI
+"${REPO_ROOT}/scripts/package.sh"    # optimised ff-router binary + signed app bundle
+
 exec "${REPO_ROOT}/target/debug/ff-router-installer" "$@"

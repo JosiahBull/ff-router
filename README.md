@@ -11,11 +11,15 @@ matching `--profile`.
 ./scripts/install.sh
 ```
 
-This builds and launches an interactive terminal wizard (the `ff-router-installer`
-crate) that discovers your Firefox profiles, walks you through building
-`~/.ff-router.toml`, installs `Firefox Router.app` into `~/Applications`, and
-then removes its own build artifacts. Afterwards, set it as the default browser
-in **System Settings → Desktop & Dock → Default web browser**.
+This builds everything up front (the optimised binary + signed app bundle),
+then launches an interactive terminal wizard (the `ff-router-installer` crate)
+that discovers your Firefox profiles and walks you through building
+`~/.ff-router.toml`. It then steps through each install action — writing the
+config, moving `Firefox Router.app` into `~/Applications`, setting permissions,
+registering, and cleaning up — confirming before each one. If a target already
+exists (e.g. a previous config) it offers **Compare** (a colour diff) /
+**Replace** / **Skip** / **Abort**. Afterwards, set it as the default browser in
+**System Settings → Desktop & Dock → Default web browser**.
 
 ## Configure
 
