@@ -26,19 +26,40 @@
 	     `ui-element` flag, which excludes them from the "Default web browser"
 	     picker and makes setting them as default silently revert. The app hides
 	     its Dock icon at runtime instead (NSApplicationActivationPolicy). -->
-	<!-- Declares this app as a handler for web links so it can be chosen as
-	     the default browser in System Settings. -->
+	<!-- Declares this app as a handler for web links. -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
 			<string>Web site URL</string>
-			<key>CFBundleTypeRole</key>
-			<string>Viewer</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>http</string>
 				<string>https</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Declaring an HTML "Viewer" document type is what makes macOS classify
+	     this as a web browser and list it under Default web browser. Handling
+	     http/https alone is not enough. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>HTML document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.html</string>
+				<string>public.xhtml</string>
+			</array>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>html</string>
+				<string>htm</string>
+				<string>shtml</string>
+				<string>xhtml</string>
 			</array>
 		</dict>
 	</array>
