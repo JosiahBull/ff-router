@@ -69,7 +69,19 @@ fn resolve(value: &str) -> PathBuf {
 }
 
 fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    if let Some(home) = std::env::var_os("HOME") {
+        return Some(PathBuf::from(home));
+    }
+
+    let user = std::env::var_os("USER").or_else(|| std::env::var_os("USERNAME"))?;
+
+    let base = match std::env::consts::OS {
+        "macos" => "/Users",
+        "windows" => "C:\\Users",
+        _ => "/home",
+    };
+
+    Some(PathBuf::from(base).join(user))
 }
 
 // --- Minimal TOML parser -------------------------------------------------

@@ -23,6 +23,7 @@ Launch Services. Then set it as the default browser:
 | `scripts/package.sh` | Build + assemble the signed `dist/Firefox Router.app` |
 | `scripts/install.sh` | Package + install to `~/Applications` + register |
 | `scripts/uninstall.sh` | Remove and deregister the installed app |
+| `scripts/clean.sh` | Remove build artifacts (`target/` and `dist/`) |
 
 The build uses nightly `build-std` with `panic=immediate-abort` plus
 `opt-level=z` + LTO + strip (see `Cargo.toml` and `scripts/build.sh`). It stays

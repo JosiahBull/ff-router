@@ -1,9 +1,5 @@
 //! A thin macOS "default browser" that routes clicked links to the right
 //! Firefox profile based on globs in `~/.ff-router.toml`.
-//!
-//! When set as the default browser, macOS launches this app with the clicked
-//! URL(s) via the `application:openURLs:` delegate callback. We match the URL
-//! against the config, then re-launch Firefox with the chosen `--profile`.
 
 mod config;
 mod glob;
