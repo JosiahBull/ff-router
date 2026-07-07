@@ -36,7 +36,9 @@ mod macos {
     use objc2::rc::Retained;
     use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
     use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send};
-    use objc2_app_kit::{NSApplication, NSApplicationDelegate, NSWorkspace};
+    use objc2_app_kit::{
+        NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSWorkspace,
+    };
     use objc2_foundation::{NSArray, NSBundle, NSError, NSString, NSURL};
 
     /// Ask macOS to make this app the default browser. Uses the async
@@ -101,10 +103,13 @@ mod macos {
         }
     }
 
-    /// Run as a background app until macOS hands us a URL to route.
+    /// Run as a background app until macOS hands us a URL to route. The Info.plist
+    /// is intentionally not `LSUIElement` (so we remain a valid default browser),
+    /// so hide the Dock icon here at runtime instead.
     pub fn run() {
         let mtm = MainThreadMarker::new().expect("main thread");
         let app = NSApplication::sharedApplication(mtm);
+        app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
 
         // The delegate must outlive `run()` (NSApplication holds it weakly).
         let delegate = Delegate::new(mtm);

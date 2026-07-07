@@ -22,9 +22,10 @@
 	<string>11.0</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
-	<!-- Background app: no Dock icon, no menu bar. -->
-	<key>LSUIElement</key>
-	<true/>
+	<!-- NOTE: deliberately NOT LSUIElement. Agent apps get the LaunchServices
+	     `ui-element` flag, which excludes them from the "Default web browser"
+	     picker and makes setting them as default silently revert. The app hides
+	     its Dock icon at runtime instead (NSApplicationActivationPolicy). -->
 	<!-- Declares this app as a handler for web links so it can be chosen as
 	     the default browser in System Settings. -->
 	<key>CFBundleURLTypes</key>

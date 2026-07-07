@@ -21,9 +21,8 @@ confirming before each one. If a target already exists (e.g. a previous config)
 it offers **Compare** (a colour diff) / **Replace** / **Skip** / **Abort**.
 
 The default-browser step triggers the macOS "change your default web browser?"
-prompt — just click confirm. (Because the app runs as a background agent, it
-won't appear in the System Settings → Default web browser dropdown, so this
-prompt is how it's set.)
+prompt — just click confirm. (It also appears in the System Settings → Default
+web browser dropdown if you'd rather switch there.)
 
 ## Configure
 
