@@ -2,7 +2,6 @@
 //! Firefox profile based on globs in `~/.ff-router.toml`.
 
 mod config;
-mod glob;
 
 use std::process::Command;
 
@@ -92,7 +91,6 @@ mod macos {
                         super::launch(&s.to_string());
                     }
                 }
-                std::process::exit(0);
             }
         }
     );
@@ -103,9 +101,6 @@ mod macos {
         }
     }
 
-    /// Run as a background app until macOS hands us a URL to route. The Info.plist
-    /// is intentionally not `LSUIElement` (so we remain a valid default browser),
-    /// so hide the Dock icon here at runtime instead.
     pub fn run() {
         let mtm = MainThreadMarker::new().expect("main thread");
         let app = NSApplication::sharedApplication(mtm);

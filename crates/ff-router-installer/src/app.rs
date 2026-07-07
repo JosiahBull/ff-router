@@ -13,7 +13,31 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wra
 use ratatui::{DefaultTerminal, Frame};
 
 use crate::discover::Profile;
+use crate::glob_help::{self, Kind};
 use crate::{config, diff, plan};
+
+/// Colours for the glob preview: `*`/`?`, `[...]`/`{a,b}`, `\` escapes, and the
+/// muted description text.
+const WILDCARD: Style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+const CLASS: Style = Style::new().fg(Color::Magenta).add_modifier(Modifier::BOLD);
+const ESCAPE: Style = Style::new().fg(Color::Yellow);
+const DESC: Style = Style::new().fg(Color::Gray);
+
+/// Colour a single glob pattern's wildcard characters for display.
+fn highlight(pattern: &str) -> Vec<Span<'static>> {
+    glob_help::tokenize(pattern)
+        .into_iter()
+        .map(|t| {
+            let style = match t.kind {
+                Kind::Literal => Style::new(),
+                Kind::Star | Kind::Any => WILDCARD,
+                Kind::Class { .. } | Kind::Alt { .. } => CLASS,
+                Kind::Escaped => ESCAPE,
+            };
+            Span::styled(t.text, style)
+        })
+        .collect()
+}
 
 pub enum Outcome {
     Install {
@@ -347,8 +371,8 @@ impl Wizard {
 
     fn render_globs(&self, frame: &mut Frame, area: Rect) {
         let profile = &self.profiles[self.edit_order[self.edit_pos]];
-        let [hint, entry, _] = Layout::vertical([
-            Constraint::Length(5),
+        let [hint, entry, preview] = Layout::vertical([
+            Constraint::Length(4),
             Constraint::Length(3),
             Constraint::Min(0),
         ])
@@ -357,7 +381,6 @@ impl Wizard {
         let lines = vec![
             Line::from("Space-separated glob patterns to open in this profile."),
             Line::from("Examples:  *://*.atlassian.net/*   *partly.com/*   *://github.com/partly*"),
-            Line::from("Leave blank to skip this profile. ('*' matches any run of characters.)"),
         ];
         frame.render_widget(
             Paragraph::new(lines).wrap(Wrap { trim: false }).block(
@@ -378,9 +401,63 @@ impl Wizard {
             entry,
         );
 
+        frame.render_widget(
+            Paragraph::new(self.glob_preview())
+                .wrap(Wrap { trim: false })
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" What this will match "),
+                ),
+            preview,
+        );
+
         let max_x = entry.x + entry.width.saturating_sub(2);
         let cursor_x = (entry.x + 1 + self.cursor as u16).min(max_x);
         frame.set_cursor_position((cursor_x, entry.y + 1));
+    }
+
+    /// A live, highlighted breakdown of the pattern(s) currently being typed:
+    /// a legend of the wildcard characters, then one line per pattern showing
+    /// it with its wildcards coloured and a plain-English description below.
+    fn glob_preview(&self) -> Vec<Line<'static>> {
+        let mut lines = vec![
+            Line::from(vec![
+                Span::raw("Wildcards:  "),
+                Span::styled("*", WILDCARD),
+                Span::raw(" any text  "),
+                Span::styled("?", WILDCARD),
+                Span::raw(" one character  "),
+                Span::styled("[…]", CLASS),
+                Span::raw(" one of a set  "),
+                Span::styled("{a,b}", CLASS),
+                Span::raw(" alternatives  "),
+                Span::styled("\\", ESCAPE),
+                Span::raw(" literal escape"),
+            ]),
+            Line::from(""),
+        ];
+
+        let input: String = self.input.iter().collect();
+        let mut patterns = input.split_whitespace().peekable();
+        if patterns.peek().is_none() {
+            lines.push(Line::from(Span::styled(
+                "Type a pattern above to see what it matches. Matching is anchored: the whole URL must match.",
+                DESC,
+            )));
+            return lines;
+        }
+
+        for pattern in patterns {
+            let mut spans = vec![Span::raw("• ")];
+            spans.extend(highlight(pattern));
+            lines.push(Line::from(spans));
+            lines.push(Line::from(vec![
+                Span::raw("    "),
+                Span::styled(glob_help::describe(pattern), DESC),
+            ]));
+        }
+        lines
     }
 
     fn render_review(&mut self, frame: &mut Frame, area: Rect) {
@@ -485,5 +562,78 @@ impl Wizard {
                 .block(block),
             area,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    fn profile(name: &str) -> Profile {
+        Profile {
+            name: name.into(),
+            dir: format!("{name}.dir"),
+            label: name.to_lowercase(),
+        }
+    }
+
+    /// Draw the wizard's current step to an in-memory backend and return the
+    /// screen contents as one string (row breaks dropped; fine for substrings).
+    fn rendered(wizard: &mut Wizard) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        terminal.draw(|frame| wizard.render(frame)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    /// A wizard sitting on the Globs step, editing the non-default profile.
+    fn on_globs_step() -> Wizard {
+        let mut wizard = Wizard::new(
+            vec![profile("Home"), profile("Work")],
+            PathBuf::from("/repo"),
+        );
+        wizard.confirm_default(); // default = Home (index 0); now editing Work
+        assert!(matches!(wizard.step, Step::Globs));
+        wizard
+    }
+
+    #[test]
+    fn globs_screen_shows_wildcard_legend() {
+        let mut wizard = on_globs_step();
+        let screen = rendered(&mut wizard);
+        assert!(screen.contains("What this will match"));
+        assert!(screen.contains("Wildcards:"));
+    }
+
+    #[test]
+    fn globs_screen_prompts_when_empty() {
+        let mut wizard = on_globs_step();
+        let screen = rendered(&mut wizard);
+        assert!(screen.contains("Type a pattern above"));
+    }
+
+    #[test]
+    fn globs_screen_describes_the_typed_pattern() {
+        let mut wizard = on_globs_step();
+        wizard.input = "*partly.com/*".chars().collect();
+        let screen = rendered(&mut wizard);
+        assert!(screen.contains("matches any URL made of"));
+        // The literal chunk appears in both the entry field and the breakdown.
+        assert!(screen.contains("partly.com/"));
+    }
+
+    #[test]
+    fn globs_screen_flags_a_bare_pattern_as_exact() {
+        let mut wizard = on_globs_step();
+        wizard.input = "github.com".chars().collect();
+        let screen = rendered(&mut wizard);
+        assert!(screen.contains("matches only the exact URL"));
     }
 }

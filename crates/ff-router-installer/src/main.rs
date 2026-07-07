@@ -8,6 +8,7 @@ mod app;
 mod config;
 mod diff;
 mod discover;
+mod glob_help;
 mod plan;
 
 use std::io::IsTerminal;

@@ -8,6 +8,8 @@ cd "$REPO_ROOT"
 APP_NAME="Firefox Router"
 APP="${APP_NAME}.app"
 BIN_NAME="ff-router"
+BUNDLE_ID="com.josiahbull.ff-router"
+LAUNCH_AGENT="${HOME}/Library/LaunchAgents/${BUNDLE_ID}.plist"
 
 DIST="${REPO_ROOT}/dist"
 DEST="${HOME}/Applications"

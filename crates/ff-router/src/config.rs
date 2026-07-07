@@ -3,9 +3,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use globset::GlobBuilder;
 use serde::Deserialize;
-
-use crate::glob;
 
 /// Directory holding Firefox profiles, relative to `$HOME`.
 const PROFILES_DIR: &str = "Library/Application Support/Firefox/Profiles";
@@ -50,7 +49,16 @@ impl Config {
     fn label_for(&self, url: &str) -> Option<&str> {
         self.rules
             .iter()
-            .find(|r| r.globs.iter().any(|g| glob::matches(g, url)))
+            .find(|r| {
+                r.globs.iter().any(|g| {
+                    GlobBuilder::new(g)
+                        .literal_separator(false) // `*`/`?` cross `/` — URLs, not paths
+                        .backslash_escape(true) // treat `\?`, `\*`, `\[` … as literals
+                        .build()
+                        .map(|glob| glob.compile_matcher().is_match(url))
+                        .unwrap_or(false)
+                })
+            })
             .map(|r| r.profile.as_str())
             .or(self.default.as_deref())
     }

@@ -5,8 +5,11 @@
 #               ~/Library/Application Support/Firefox/Profiles/), or an
 #               absolute path.
 # `[[rule]]` : ordered override rules. The first rule with a glob matching the
-#               URL wins. Globs use `*`, which matches any run of characters
-#               (including `/`); everything else matches literally.
+#               URL wins. Globs use full Unix-shell syntax: `*` (any run,
+#               including `/`), `?` (any single char), `[abc]`/`[a-z]` classes,
+#               `[!abc]` negation, and `{a,b}` alternation. Escape a literal
+#               metacharacter with `\` — e.g. `\?` to match a real `?` in a
+#               query string. The match is anchored (the whole URL must match).
 
 default = "personal"
 

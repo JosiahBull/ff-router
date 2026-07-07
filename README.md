@@ -11,19 +11,6 @@ matching `--profile`.
 ./scripts/install.sh
 ```
 
-This builds everything up front (the optimised binary + signed app bundle),
-then launches an interactive terminal wizard (the `ff-router-installer` crate)
-that discovers your Firefox profiles and walks you through building
-`~/.ff-router.toml`. It then steps through each install action — writing the
-config, moving `Firefox Router.app` into `~/Applications`, setting permissions,
-registering, requesting to become your default browser, and cleaning up —
-confirming before each one. If a target already exists (e.g. a previous config)
-it offers **Compare** (a colour diff) / **Replace** / **Skip** / **Abort**.
-
-The default-browser step triggers the macOS "change your default web browser?"
-prompt — just click confirm. (It also appears in the System Settings → Default
-web browser dropdown if you'd rather switch there.)
-
 ## Configure
 
 The installer writes `~/.ff-router.toml` for you. To create or edit it by hand
@@ -45,14 +32,8 @@ profile = "work"
 globs = ["*://*.atlassian.net/*", "*://github.com/partly*"]
 ```
 
-Find your profile directory names under
-`~/Library/Application Support/Firefox/Profiles/`. If Firefox has no config or
-no rule matches and there's no `default`, links open in Firefox's own default
-profile.
-
-## Test without changing your default browser
+## Uninstall
 
 ```sh
-cargo test                                    # routing logic
-cargo run -- https://team.atlassian.net/x     # route one URL now
+./scripts/uninstall.sh
 ```
