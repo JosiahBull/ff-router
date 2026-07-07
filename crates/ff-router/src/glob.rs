@@ -1,36 +1,20 @@
 //! A tiny glob matcher supporting a single wildcard: `*`, which matches any run
 //! of characters (including `/` and the empty string). Every other character is
 //! matched literally, and the match is anchored — the whole URL must match.
+//!
+//! Backed by `wildmatch`. Its single-character wildcard is bound to NUL (which
+//! never appears in a URL or a config pattern), leaving `*` as the only
+//! metacharacter so `?` and friends stay literal.
+
+use wildmatch::WildMatchPattern;
+
+/// A `wildmatch` pattern where `*` is the only wildcard; the single-character
+/// wildcard slot is disabled by binding it to a char real input can't contain.
+type Glob = WildMatchPattern<'*', '\0'>;
 
 /// Returns whether `text` matches the glob `pattern`.
 pub fn matches(pattern: &str, text: &str) -> bool {
-    let pat: Vec<char> = pattern.chars().collect();
-    let text: Vec<char> = text.chars().collect();
-
-    let (mut pi, mut ti) = (0usize, 0usize);
-    // Position to resume from on mismatch: (pattern index after `*`, text index).
-    let mut star: Option<(usize, usize)> = None;
-
-    while ti < text.len() {
-        if pat.get(pi) == Some(&'*') {
-            star = Some((pi + 1, ti));
-            pi += 1;
-        } else if pat.get(pi) == Some(&text[ti]) {
-            pi += 1;
-            ti += 1;
-        } else if let Some((resume_pi, star_ti)) = star {
-            pi = resume_pi;
-            ti = star_ti + 1;
-            star = Some((resume_pi, star_ti + 1));
-        } else {
-            return false;
-        }
-    }
-
-    while pat.get(pi) == Some(&'*') {
-        pi += 1;
-    }
-    pi == pat.len()
+    Glob::new(pattern).matches(text)
 }
 
 #[cfg(test)]
@@ -71,5 +55,15 @@ mod tests {
         assert!(matches("**", "anything"));
         assert!(matches("", ""));
         assert!(!matches("", "x"));
+    }
+
+    #[test]
+    fn question_mark_is_literal() {
+        // `*` is the only wildcard; `?` matches only itself (URLs use it for
+        // query strings), so it must not behave as a single-char wildcard.
+        assert!(matches("a?c", "a?c"));
+        assert!(!matches("a?c", "abc"));
+        assert!(matches("*/search?q=*", "https://x.com/search?q=rust"));
+        assert!(!matches("*/search?q=*", "https://x.com/searchXq=rust"));
     }
 }
