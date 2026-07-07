@@ -2,6 +2,9 @@
 **/*.rs.bk
 *.pdb
 
+# Assembled app bundle (produced by `make bundle`)
+/*.app
+
 # Editor / OS cruft
 .DS_Store
 .idea/

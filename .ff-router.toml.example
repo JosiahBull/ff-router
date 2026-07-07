@@ -1,0 +1,24 @@
+# Copy to ~/.ff-router.toml
+#
+# `default`  : profile label used when no rule matches.
+# `[profiles]`: label -> Firefox profile directory name (under
+#               ~/Library/Application Support/Firefox/Profiles/), or an
+#               absolute path.
+# `[[rule]]` : ordered override rules. The first rule with a glob matching the
+#               URL wins. Globs use `*`, `?`, `{a,b}` alternation and `[..]`
+#               classes; `*` matches any characters (including `/`).
+
+default = "personal"
+
+[profiles]
+work     = "qtIifLeX.Profile 1"        # Firefox "Work" profile
+personal = "dhutbqgo.default-release"   # Firefox "Home" profile
+
+[[rule]]
+profile = "work"
+globs = [
+    "*://*.atlassian.net/*",
+    "*://*.slack.com/*",
+    "*://github.com/partly*",
+    "*://*.partly.com/*",
+]

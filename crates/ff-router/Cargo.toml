@@ -1,0 +1,36 @@
+[package]
+name = "ff-router"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ff-router"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+globset = "0.4.18"
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "1.1.2"
+
+# macOS-only: register as default browser and receive clicked URLs.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSResponder",
+] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSArray",
+    "NSEnumerator",
+    "NSString",
+    "NSURL",
+] }
