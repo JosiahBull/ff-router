@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "ff-router"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "block2",
  "globset",
@@ -184,7 +184,7 @@ dependencies = [
 
 [[package]]
 name = "ff-router-installer"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "ratatui",
  "similar",
@@ -345,6 +345,7 @@ checksum = "d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c"
 dependencies = [
  "bitflags",
  "block2",
+ "libc",
  "objc2",
  "objc2-foundation",
 ]
