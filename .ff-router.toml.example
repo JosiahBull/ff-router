@@ -1,16 +1,28 @@
 # Copy to ~/.ff-router.toml
 #
+# `debug`    : when true, append one line per opened link to ~/.ff-router.log
+#               (the URL, the opening app, and the matched rule). Off by
+#               default; the log grows unbounded, so turn it back off when done.
 # `default`  : profile label used when no rule matches.
 # `[profiles]`: label -> Firefox profile directory name (under
 #               ~/Library/Application Support/Firefox/Profiles/), or an
 #               absolute path.
-# `[[rule]]` : ordered override rules. The first rule with a glob matching the
-#               URL wins. Globs use full Unix-shell syntax: `*` (any run,
-#               including `/`), `?` (any single char), `[abc]`/`[a-z]` classes,
-#               `[!abc]` negation, and `{a,b}` alternation. Escape a literal
+# `[[rule]]` : ordered override rules. The first matching rule wins. A rule can
+#               match on the URL (`globs`), the app that opened the link
+#               (`source`), or both — when both are set, both must match.
+#               Globs use full Unix-shell syntax: `*` (any run, including `/`),
+#               `?` (any single char), `[abc]`/`[a-z]` classes, `[!abc]`
+#               negation, and `{a,b}` alternation. Escape a literal
 #               metacharacter with `\` — e.g. `\?` to match a real `?` in a
-#               query string. The match is anchored (the whole URL must match).
+#               query string. The match is anchored (the whole value must match).
+#
+#               `source` globs are matched against the opening application's
+#               bundle id AND its localized name (either matching is enough).
+#               Best-effort: links opened without a sender (terminal `open`,
+#               Spotlight, some sandboxed apps) have no opener, so `source`
+#               rules skip them.
 
+debug = false
 default = "personal"
 
 [profiles]
@@ -24,4 +36,13 @@ globs = [
     "*://*.slack.com/*",
     "*://github.com/partly*",
     "*://*.partly.com/*",
+]
+
+# Send everything opened from Slack or Microsoft Teams to the work profile,
+# whatever the URL. (Matched against the opener's bundle id or app name.)
+[[rule]]
+profile = "work"
+source = [
+    "com.tinyspeck.*",   # Slack
+    "Microsoft Teams",
 ]

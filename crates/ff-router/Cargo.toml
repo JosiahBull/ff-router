@@ -28,6 +28,7 @@ block2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
     "std",
     "block2",
+    "libc",             # unlocks NSRunningApplication::runningApplicationWithProcessIdentifier
     "NSApplication",
     "NSResponder",
     "NSRunningApplication",
@@ -35,6 +36,8 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = [
 ] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = [
     "std",
+    "NSAppleEventDescriptor",  # read the sender PID off the URL Apple Event
+    "NSAppleEventManager",     # `currentAppleEvent` inside `application:openURLs:`
     "NSArray",
     "NSBundle",
     "NSEnumerator",

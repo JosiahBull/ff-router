@@ -2,10 +2,11 @@
 //! Firefox profile based on globs in `~/.ff-router.toml`.
 
 mod config;
+mod debug;
 
 use std::process::Command;
 
-use config::Config;
+use config::{Config, Opener};
 
 const FIREFOX: &str = "/Applications/Firefox.app/Contents/MacOS/firefox";
 
@@ -13,17 +14,34 @@ fn main() {
     match std::env::args().nth(1).as_deref() {
         // Ask macOS to make us the default browser (triggers the system prompt).
         Some("--set-default") => macos::set_default_browser(),
-        // Direct invocation with a URL (terminal use / testing) skips AppKit.
-        Some(url) if url.starts_with("http://") || url.starts_with("https://") => launch(url),
+        // Direct invocation with a URL (terminal use / testing) skips AppKit,
+        // so there is no opening application to attribute it to.
+        Some(url) if url.starts_with("http://") || url.starts_with("https://") => {
+            launch(url, None)
+        }
         _ => macos::run(),
     }
 }
 
-/// Launch Firefox with the URL in the profile the config routes it to. Falls
-/// back to Firefox's default profile when there is no config or no match.
-fn launch(url: &str) {
+/// Launch Firefox with the URL in the profile the config routes it to, given
+/// the application that opened it (`None` if unknown). Falls back to Firefox's
+/// default profile when there is no config or no match. When the config has
+/// `debug = true`, appends the decision to `~/.ff-router.log`.
+fn launch(url: &str, opener: Option<&Opener>) {
+    let config = Config::load();
+    let profile = match &config {
+        // Debug on: resolve *and* explain, then log the decision.
+        Some(c) if c.is_debug() => {
+            let decision = c.decide(url, opener);
+            debug::log(url, opener, &decision.explanation);
+            decision.profile
+        }
+        Some(c) => c.profile_path(url, opener),
+        None => None,
+    };
+
     let mut cmd = Command::new(FIREFOX);
-    if let Some(profile) = Config::load().and_then(|c| c.profile_path(url)) {
+    if let Some(profile) = profile {
         cmd.arg("--profile").arg(profile);
     }
     cmd.arg(url);
@@ -36,9 +54,14 @@ mod macos {
     use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
     use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send};
     use objc2_app_kit::{
-        NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSWorkspace,
+        NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSRunningApplication,
+        NSWorkspace,
     };
-    use objc2_foundation::{NSArray, NSBundle, NSError, NSString, NSURL};
+    use objc2_foundation::{
+        NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSBundle, NSError, NSString, NSURL,
+    };
+
+    use super::Opener;
 
     /// Ask macOS to make this app the default browser. Uses the async
     /// `NSWorkspace` API (macOS 12+), which shows the system "change your
@@ -86,14 +109,46 @@ mod macos {
         unsafe impl NSApplicationDelegate for Delegate {
             #[unsafe(method(application:openURLs:))]
             fn open_urls(&self, _app: &NSApplication, urls: &NSArray<NSURL>) {
+                // One Apple Event delivers the whole batch, so the opener is
+                // shared across these URLs (in practice there is only one).
+                let opener = current_opener();
                 for url in urls {
                     if let Some(s) = url.absoluteString() {
-                        super::launch(&s.to_string());
+                        super::launch(&s.to_string(), opener.as_ref());
                     }
                 }
             }
         }
     );
+
+    /// The application that asked us to open the URL currently being handled,
+    /// read from the sender PID of the Apple Event AppKit is dispatching into
+    /// `application:openURLs:`. Returns `None` when there is no such event
+    /// (direct/terminal invocation) or no sender is attached (Spotlight, the
+    /// `open` tool, some sandboxed callers).
+    fn current_opener() -> Option<Opener> {
+        // fourCC `keySenderPIDAttr` ('spid'): the sender's pid on the event.
+        const KEY_SENDER_PID_ATTR: u32 = u32::from_be_bytes(*b"spid");
+
+        let event = NSAppleEventManager::sharedAppleEventManager().currentAppleEvent()?;
+        // `attributeDescriptorForKeyword:` is exposed by objc2 only behind the
+        // heavyweight `objc2-core-services` feature (solely for its `AEKeyword`
+        // alias, a plain `u32`). Send the message directly to avoid that dep.
+        let pid_desc: Option<Retained<NSAppleEventDescriptor>> =
+            unsafe { msg_send![&*event, attributeDescriptorForKeyword: KEY_SENDER_PID_ATTR] };
+        let pid = pid_desc?.int32Value();
+        if pid <= 0 {
+            return None;
+        }
+
+        let app = NSRunningApplication::runningApplicationWithProcessIdentifier(pid)?;
+        let opener = Opener {
+            bundle_id: app.bundleIdentifier().map(|s| s.to_string()),
+            name: app.localizedName().map(|s| s.to_string()),
+        };
+        // Nothing to match on if the process exposed neither identifier.
+        (opener.bundle_id.is_some() || opener.name.is_some()).then_some(opener)
+    }
 
     impl Delegate {
         fn new(mtm: MainThreadMarker) -> Retained<Self> {
