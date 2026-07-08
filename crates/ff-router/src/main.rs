@@ -16,9 +16,7 @@ fn main() {
         Some("--set-default") => macos::set_default_browser(),
         // Direct invocation with a URL (terminal use / testing) skips AppKit,
         // so there is no opening application to attribute it to.
-        Some(url) if url.starts_with("http://") || url.starts_with("https://") => {
-            launch(url, None)
-        }
+        Some(url) if url.starts_with("http://") || url.starts_with("https://") => launch(url, None),
         _ => macos::run(),
     }
 }

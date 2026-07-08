@@ -284,7 +284,10 @@ mod tests {
 
         // Matches on bundle id.
         let slack = opener("com.tinyspeck.slackmacgap", "Slack");
-        assert_eq!(c.label_for("https://example.com", Some(&slack)), Some("work"));
+        assert_eq!(
+            c.label_for("https://example.com", Some(&slack)),
+            Some("work")
+        );
 
         // Matches on localized name even though the bundle id doesn't.
         let outlook = opener("com.microsoft.Outlook", "Microsoft Outlook");
@@ -315,7 +318,8 @@ mod tests {
         let d = cfg().decide("https://foo.slack.com/x", None);
         assert!(d.profile.is_some());
         assert!(
-            d.explanation.starts_with("matched rule #0 -> profile \"work\""),
+            d.explanation
+                .starts_with("matched rule #0 -> profile \"work\""),
             "{}",
             d.explanation
         );
@@ -335,7 +339,11 @@ mod tests {
         let c = parse("[[rule]]\nprofile = \"ghost\"\nglobs = [\"*\"]\n").unwrap();
         let d = c.decide("https://anything", None);
         assert!(d.profile.is_none());
-        assert!(d.explanation.contains("not found in [profiles]"), "{}", d.explanation);
+        assert!(
+            d.explanation.contains("not found in [profiles]"),
+            "{}",
+            d.explanation
+        );
     }
 
     #[test]
