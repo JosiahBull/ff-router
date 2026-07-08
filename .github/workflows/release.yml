@@ -47,10 +47,11 @@ jobs:
 
           exit "${fail}"
 
-  # Build both binaries as universal (arm64 + x86_64) so the release runs on any
-  # Mac. macOS runner required: ff-router links AppKit via objc2.
+  # Build both binaries for arm64 (Apple Silicon) only. macOS runner required:
+  # ff-router links AppKit via objc2. macos-latest is itself arm64, so this is a
+  # native build, not a cross-compile.
   build:
-    name: Build universal macOS binaries
+    name: Build macOS arm64 binaries
     needs: [version-check]
     runs-on: macos-latest
     steps:
@@ -58,34 +59,27 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # ff-router is built with `build-std` (needs rust-src); the installer
-      # cross-compiles to Intel with the prebuilt std (needs the added target).
-      # The toolchain (nightly) itself comes from rust-toolchain.toml.
-      - name: Provision toolchain components and targets
+      # ff-router is built with `build-std` (needs rust-src). The toolchain
+      # (nightly) itself comes from rust-toolchain.toml.
+      - name: Provision toolchain components and target
         run: |
           rustup component add rust-src
-          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustup target add aarch64-apple-darwin
 
       # scripts/build.sh applies the size-optimised build-std flags for the
       # TARGET we pass, so the released binary matches a local build exactly.
-      - name: Build ff-router (size-optimised, universal)
+      - name: Build ff-router (size-optimised, arm64)
         run: |
           TARGET=aarch64-apple-darwin scripts/build.sh
-          TARGET=x86_64-apple-darwin scripts/build.sh
           mkdir -p dist
-          lipo -create -output dist/ff-router \
-            target/aarch64-apple-darwin/release/ff-router \
-            target/x86_64-apple-darwin/release/ff-router
-          lipo -info dist/ff-router
+          cp target/aarch64-apple-darwin/release/ff-router dist/ff-router
+          file dist/ff-router
 
-      - name: Build ff-router-installer (universal)
+      - name: Build ff-router-installer (arm64)
         run: |
           cargo build -p ff-router-installer --release --target aarch64-apple-darwin
-          cargo build -p ff-router-installer --release --target x86_64-apple-darwin
-          lipo -create -output dist/ff-router-installer \
-            target/aarch64-apple-darwin/release/ff-router-installer \
-            target/x86_64-apple-darwin/release/ff-router-installer
-          lipo -info dist/ff-router-installer
+          cp target/aarch64-apple-darwin/release/ff-router-installer dist/ff-router-installer
+          file dist/ff-router-installer
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4

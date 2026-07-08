@@ -13,8 +13,8 @@ LAUNCH_AGENT="${HOME}/Library/LaunchAgents/${BUNDLE_ID}.plist"
 
 DIST="${REPO_ROOT}/dist"
 DEST="${HOME}/Applications"
-# Default to the host triple, but let callers cross-compile by exporting TARGET
-# (the release workflow builds both Apple arches this way, then lipos them).
+# Default to the host triple, but let callers override by exporting TARGET
+# (the release workflow pins TARGET=aarch64-apple-darwin this way).
 TARGET="${TARGET:-$(rustc -vV | awk '/^host:/{print $2}')}"
 RELEASE_BIN="${REPO_ROOT}/target/${TARGET}/release/${BIN_NAME}"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
