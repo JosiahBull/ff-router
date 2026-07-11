@@ -20,6 +20,7 @@ toml = { version = "1.1.2", default-features = false, features = ["parse", "serd
 # Full Unix-shell glob matching (classes, ranges, negation, `{a,b}`, `\` escapes).
 # `default-features = false` drops the optional `log` dep to trim the binary.
 globset = { version = "0.4", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["alloc", "now"] }
 
 # macOS-only: register as default browser and receive clicked URLs.
 [target.'cfg(target_os = "macos")'.dependencies]

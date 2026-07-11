@@ -13,6 +13,10 @@ const REPO: &str = "josiahbull/ff-router";
 /// The bundle's `Info.plist`, baked in at compile time so the installer can
 /// assemble the app without a repo checkout on the user's machine.
 const INFO_PLIST: &str = include_str!("../../../Info.plist");
+/// The LaunchAgent plist that starts the resident router at login, baked in at
+/// compile time. The `{program}` placeholder is replaced with the absolute path
+/// to the installed executable when the login item is written.
+const LOGIN_ITEM_PLIST: &str = include_str!("../../../LaunchAgent.plist");
 
 /// Where the `ff-router` executable comes from when assembling the app bundle.
 #[derive(Clone)]
@@ -25,12 +29,12 @@ pub enum AppSource {
 
 /// A single install step.
 pub enum Action {
-    /// Write text to a file (the config).
+    /// Write text to a file.
     WriteFile { path: PathBuf, contents: String },
     /// Obtain `ff-router` (download or copy) and assemble a signed
     /// `Firefox Router.app` inside `staging`.
     FetchApp { source: AppSource, staging: PathBuf },
-    /// Move a directory into `dir` (the app bundle into ~/Applications).
+    /// Move a directory into `dir`.
     MoveInto { from: PathBuf, dir: PathBuf },
     /// Set the executable bit on a file.
     MakeExecutable { path: PathBuf },
@@ -350,28 +354,7 @@ fn current_uid() -> String {
 /// login session (it needs Launch Services / the window server); `Interactive`
 /// marks it as a foreground-quality process rather than a batch daemon.
 fn login_item_plist(program: &Path) -> String {
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>Label</key>
-	<string>{BUNDLE_ID}</string>
-	<key>ProgramArguments</key>
-	<array>
-		<string>{program}</string>
-	</array>
-	<key>RunAtLoad</key>
-	<true/>
-	<key>ProcessType</key>
-	<string>Interactive</string>
-	<key>LimitLoadToSessionType</key>
-	<string>Aqua</string>
-</dict>
-</plist>
-"#,
-        program = xml_escape(&program.display().to_string())
-    )
+    LOGIN_ITEM_PLIST.replace("{program}", &xml_escape(&program.display().to_string()))
 }
 
 /// Escape the characters that would break out of an XML text node. macOS

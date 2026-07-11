@@ -73,9 +73,7 @@ fn main() -> ExitCode {
     code
 }
 
-/// Decide where `ff-router` comes from: a local build when `FF_ROUTER_BIN`
-/// points at one (for development), otherwise the release matching this
-/// installer's own version.
+/// Decide where `ff-router` comes from.
 fn app_source() -> Result<AppSource, String> {
     match std::env::var_os("FF_ROUTER_BIN") {
         Some(path) if Path::new(&path).is_file() => Ok(AppSource::Local {

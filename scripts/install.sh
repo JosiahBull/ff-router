@@ -29,7 +29,4 @@ echo "Downloading the installer from ${url} ..."
 curl -fsSL --retry 3 -o "${bin}" "${url}"
 chmod +x "${bin}"
 
-# The installer is an interactive TUI. When this script is itself piped into a
-# shell (`curl … | bash`), our stdin is the pipe rather than the keyboard, so
-# reconnect the installer's stdin to the controlling terminal.
 "${bin}" </dev/tty

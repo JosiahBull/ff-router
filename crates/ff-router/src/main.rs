@@ -129,9 +129,6 @@ mod macos {
         const KEY_SENDER_PID_ATTR: u32 = u32::from_be_bytes(*b"spid");
 
         let event = NSAppleEventManager::sharedAppleEventManager().currentAppleEvent()?;
-        // `attributeDescriptorForKeyword:` is exposed by objc2 only behind the
-        // heavyweight `objc2-core-services` feature (solely for its `AEKeyword`
-        // alias, a plain `u32`). Send the message directly to avoid that dep.
         let pid_desc: Option<Retained<NSAppleEventDescriptor>> =
             unsafe { msg_send![&*event, attributeDescriptorForKeyword: KEY_SENDER_PID_ATTR] };
         let pid = pid_desc?.int32Value();
