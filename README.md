@@ -17,6 +17,25 @@ Building from a local checkout instead:
 ./scripts/dev-install.sh
 ```
 
+### Scripted / non-interactive install
+
+For dotfiles bootstraps and other unattended setups, skip the TUI with
+`--non-interactive`. The installer expects the referenced Firefox profiles to
+already exist and reuses `~/.ff-router.toml` (or writes one from `--config`),
+then downloads the release binary, assembles the app, registers it, and
+installs the login item:
+
+```sh
+# Reuse an existing ~/.ff-router.toml, then install the app:
+ff-router-installer --non-interactive
+
+# Or supply the config and skip the default-browser prompt (e.g. in CI):
+ff-router-installer --non-interactive --config ./ff-router.toml --no-set-default
+```
+
+Everything else is identical to the interactive install; only the profile
+discovery and step-by-step confirmation are skipped.
+
 [release]: https://github.com/josiahbull/ff-router/releases/latest
 
 ## Configure
@@ -51,6 +70,29 @@ opener's bundle id *and* its localized name, so `"Slack"` and
 `"com.tinyspeck.*"` both work. Detection is best-effort: links opened without a
 sender — a terminal `open`, Spotlight, some sandboxed apps — carry no opener, so
 `source` rules simply don't match them and routing falls through to `globs`/`default`.
+
+### Shared base + local overrides (`extends`)
+
+Point `extends` at one or more base configs to merge them under this one. This
+keeps shared defaults in a single tracked place (e.g. a dotfiles repo) while
+`~/.ff-router.toml` holds per-machine tweaks:
+
+```toml
+# ~/.ff-router.toml — local, per-machine
+extends = "~/.dotfiles/.ff-router.toml"   # or an array of paths
+
+# machine-specific overrides:
+[[rule]]
+profile = "work"
+globs = ["*://*.internal.acme.corp/*"]
+```
+
+Merge rules: this file wins over its bases; `[profiles]` tables merge key by
+key; and the ordered `[[rule]]` list is concatenated with **this file's rules
+first**, then each base in turn (so a local rule beats a shared one on an
+overlapping URL, and the shared rules remain as the fallback). A leading `~/`
+is expanded and a relative path resolves against the including file's
+directory; a missing base is warned about and skipped.
 
 ### Debugging
 

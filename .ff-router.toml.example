@@ -1,5 +1,13 @@
 # Copy to ~/.ff-router.toml
 #
+# `extends`  : optional path (or array of paths) to base config files merged in
+#               under this one. Use it to keep shared defaults in one place
+#               (e.g. a dotfiles repo) while this file holds per-machine
+#               overrides. This file wins over its bases; for the ordered
+#               `[[rule]]` list, this file's rules are tried first, then each
+#               base in turn. A leading `~/` is expanded; a relative path is
+#               resolved against this file's directory. Example:
+#                   extends = "~/.dotfiles/.ff-router.toml"
 # `debug`    : when true, append one line per opened link to ~/.ff-router.log
 #               (the URL, the opening app, and the matched rule). Off by
 #               default; the log grows unbounded, so turn it back off when done.
