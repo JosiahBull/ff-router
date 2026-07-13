@@ -1,6 +1,6 @@
 //! Loading and evaluation of `~/.ff-router.toml`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use globset::GlobBuilder;
@@ -63,11 +63,13 @@ struct Rule {
 }
 
 impl Config {
-    /// Read and parse the config from `$HOME/.ff-router.toml`.
+    /// Read the config from `$HOME/.ff-router.toml`, resolving any `extends`
+    /// bases and merging them under it (see [`load_merged`] for the semantics).
     pub fn load() -> Option<Self> {
         let path = home()?.join(".ff-router.toml");
-        let text = std::fs::read_to_string(path).ok()?;
-        parse(&text).ok()
+        let mut visited = HashSet::new();
+        let table = load_merged(&path, &mut visited, 0)?;
+        toml::Value::Table(table).try_into().ok()
     }
 
     /// Whether routing decisions should be appended to the debug log.
@@ -198,10 +200,134 @@ pub(crate) fn home() -> Option<PathBuf> {
     Some(PathBuf::from(base).join(user))
 }
 
-/// Parse the TOML `input` into a [`Config`]. Unknown tables and keys are
-/// ignored (serde skips fields the structs don't declare).
+/// Parse the TOML `input` into a [`Config`], skipping `extends` resolution.
+/// Test-only: production loads go through [`Config::load`] / [`load_merged`].
+#[cfg(test)]
 fn parse(input: &str) -> Result<Config, toml::de::Error> {
     toml::from_str(input)
+}
+
+/// Depth bound on `extends` chains, to stop a malformed config recursing forever.
+const MAX_EXTENDS_DEPTH: usize = 16;
+
+/// Load `path` as a TOML table, recursively resolving its `extends` bases and
+/// merging them **under** it. This file's own keys win; the ordered `[[rule]]`
+/// list is concatenated with this file's rules first (so a local rule overrides
+/// a shared one), with each `extends` target filling in behind, first-listed
+/// outranking later. A missing or malformed `extends` target is warned about
+/// and skipped; `None` is returned only when `path` itself can't be read or
+/// parsed. `extends` accepts a single path string or an array of them.
+fn load_merged(path: &Path, visited: &mut HashSet<PathBuf>, depth: usize) -> Option<toml::Table> {
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if !visited.insert(canonical) {
+        // Already on this resolution path — a cycle. Contribute nothing.
+        return Some(toml::Table::new());
+    }
+
+    let text = std::fs::read_to_string(path).ok()?;
+    let mut table: toml::Table = toml::from_str(&text).ok()?;
+    let bases = take_extends(&mut table);
+
+    if bases.is_empty() {
+        return Some(table);
+    }
+    if depth >= MAX_EXTENDS_DEPTH {
+        eprintln!(
+            "ff-router: ignoring `extends` in {} (nested too deeply)",
+            path.display()
+        );
+        return Some(table);
+    }
+
+    // Fold bases lowest-priority-first, then let `table` win over all of them.
+    // Iterating in reverse makes the first-listed base outrank later ones.
+    let mut merged = toml::Table::new();
+    for raw in bases.iter().rev() {
+        let base_path = resolve_extends_path(raw, path);
+        match load_merged(&base_path, visited, depth + 1) {
+            Some(base) => merge_tables(&mut merged, base),
+            None => eprintln!(
+                "ff-router: skipping unreadable extends target {} (from {})",
+                base_path.display(),
+                path.display()
+            ),
+        }
+    }
+    merge_tables(&mut merged, table);
+    Some(merged)
+}
+
+/// Remove and return the `extends` path(s) from a parsed table (string or array
+/// of strings; anything else yields no bases).
+fn take_extends(table: &mut toml::Table) -> Vec<String> {
+    match table.remove("extends") {
+        Some(toml::Value::String(s)) => vec![s],
+        Some(toml::Value::Array(items)) => items
+            .into_iter()
+            .filter_map(|v| match v {
+                toml::Value::String(s) => Some(s),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Resolve an `extends` path: expand a leading `~/`, keep an absolute path as-is,
+/// and resolve a relative path against the including file's directory.
+fn resolve_extends_path(raw: &str, including: &Path) -> PathBuf {
+    if let Some(rest) = raw.strip_prefix("~/") {
+        if let Some(home) = home() {
+            return home.join(rest);
+        }
+    }
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        path
+    } else {
+        including
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(path)
+    }
+}
+
+/// Deep-merge `over` onto `base`, with `over` winning:
+/// - the `[[rule]]` array concatenates with `over`'s rules first (local
+///   overrides shared);
+/// - nested tables (e.g. `[profiles]`) merge key-by-key;
+/// - every other key takes `over`'s value.
+fn merge_tables(base: &mut toml::Table, over: toml::Table) {
+    for (key, over_val) in over {
+        if key == "rule" {
+            let mut rules = into_array(over_val);
+            if let Some(existing) = base.remove("rule") {
+                rules.extend(into_array(existing));
+            }
+            base.insert(key, toml::Value::Array(rules));
+            continue;
+        }
+
+        let base_is_table = matches!(base.get(&key), Some(toml::Value::Table(_)));
+        match over_val {
+            toml::Value::Table(over_t) if base_is_table => {
+                if let Some(toml::Value::Table(base_t)) = base.get_mut(&key) {
+                    merge_tables(base_t, over_t);
+                }
+            }
+            other => {
+                base.insert(key, other);
+            }
+        }
+    }
+}
+
+/// A TOML value as an array (a non-array becomes a single-element array).
+fn into_array(value: toml::Value) -> Vec<toml::Value> {
+    match value {
+        toml::Value::Array(items) => items,
+        other => vec![other],
+    }
 }
 
 #[cfg(test)]
@@ -421,5 +547,119 @@ mod tests {
         // `default` sits at root before `[other]`, so it still applies.
         let c = parse("default = \"p\"\n[other]\nk = \"v\"\n").unwrap();
         assert_eq!(c.label_for("https://anything", None), Some("p"));
+    }
+
+    fn table(input: &str) -> toml::Table {
+        toml::from_str(input).unwrap()
+    }
+
+    #[test]
+    fn merge_prefers_over_and_unions_profiles() {
+        let mut base =
+            table("debug = true\ndefault = \"home\"\n[profiles]\nhome = \"H\"\nwork = \"W\"\n");
+        let over = table("default = \"work\"\n[profiles]\nwork = \"W2\"\nplay = \"P\"\n");
+        merge_tables(&mut base, over);
+
+        // `over` wins on the scalar it sets; the one it omits is inherited.
+        assert_eq!(base["default"].as_str(), Some("work"));
+        assert_eq!(base["debug"].as_bool(), Some(true));
+        // Profiles union, with `over` winning per key.
+        let profiles = base["profiles"].as_table().unwrap();
+        assert_eq!(profiles["home"].as_str(), Some("H"));
+        assert_eq!(profiles["work"].as_str(), Some("W2"));
+        assert_eq!(profiles["play"].as_str(), Some("P"));
+    }
+
+    #[test]
+    fn merge_puts_local_rules_first() {
+        let mut base = table("[[rule]]\nprofile = \"shared\"\nglobs = [\"*shared*\"]\n");
+        let over = table("[[rule]]\nprofile = \"local\"\nglobs = [\"*local*\"]\n");
+        merge_tables(&mut base, over);
+
+        let rules = base["rule"].as_array().unwrap();
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0]["profile"].as_str(), Some("local"));
+        assert_eq!(rules[1]["profile"].as_str(), Some("shared"));
+    }
+
+    #[test]
+    fn take_extends_reads_string_and_array() {
+        let mut t = table("extends = \"a.toml\"\n");
+        assert_eq!(take_extends(&mut t), vec!["a.toml".to_string()]);
+        assert!(!t.contains_key("extends"));
+
+        let mut t = table("extends = [\"a.toml\", \"b.toml\"]\n");
+        assert_eq!(
+            take_extends(&mut t),
+            vec!["a.toml".to_string(), "b.toml".to_string()]
+        );
+    }
+
+    #[test]
+    fn load_merges_extends_chain() {
+        let dir = std::env::temp_dir().join(format!("ffr-cfg-load-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let base = dir.join("shared.toml");
+        std::fs::write(
+            &base,
+            "default = \"home\"\n\
+             [profiles]\nhome = \"H\"\nwork = \"W\"\n\
+             [[rule]]\nprofile = \"work\"\nglobs = [\"*work.example/*\"]\n",
+        )
+        .unwrap();
+
+        let root = dir.join(".ff-router.toml");
+        std::fs::write(
+            &root,
+            format!(
+                "extends = \"{}\"\n\
+                 [[rule]]\nprofile = \"home\"\nglobs = [\"*work.example/override*\"]\n",
+                base.display()
+            ),
+        )
+        .unwrap();
+
+        let mut visited = HashSet::new();
+        let merged = load_merged(&root, &mut visited, 0).unwrap();
+        let cfg: Config = toml::Value::Table(merged).try_into().unwrap();
+
+        // Local rule wins for the overlapping URL...
+        assert_eq!(
+            cfg.label_for("https://work.example/override/x", None),
+            Some("home")
+        );
+        // ...while the shared rule still catches other work URLs...
+        assert_eq!(
+            cfg.label_for("https://work.example/dashboard", None),
+            Some("work")
+        );
+        // ...and the inherited default applies to everything else.
+        assert_eq!(
+            cfg.label_for("https://unrelated.example", None),
+            Some("home")
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn load_tolerates_missing_extends_target() {
+        let dir = std::env::temp_dir().join(format!("ffr-cfg-miss-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let root = dir.join(".ff-router.toml");
+        std::fs::write(
+            &root,
+            "extends = \"./does-not-exist.toml\"\ndefault = \"home\"\n",
+        )
+        .unwrap();
+
+        let mut visited = HashSet::new();
+        let merged = load_merged(&root, &mut visited, 0).unwrap();
+        let cfg: Config = toml::Value::Table(merged).try_into().unwrap();
+        // The unreadable base is skipped; the root's own values still load.
+        assert_eq!(cfg.label_for("https://anything", None), Some("home"));
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
