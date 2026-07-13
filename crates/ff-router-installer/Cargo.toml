@@ -18,4 +18,4 @@ workspace = true
 # built on demand and removes its own artifacts once it finishes.
 [dependencies]
 ratatui = "0.29"
-similar = "2"
+similar = "3"
