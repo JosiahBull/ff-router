@@ -3,18 +3,9 @@
 //! By default it runs an interactive TUI: discover Firefox profiles, walk you
 //! through building `~/.ff-router.toml`, then step through the install plan
 //! action-by-action. Pass `--non-interactive` to run the same plan headlessly
-//! against an existing (or `--config`-supplied) config — used by scripted
-//! installs such as a dotfiles bootstrap. In both modes the `ff-router` binary
-//! is downloaded from the matching GitHub release (or taken from a local build
-//! via `FF_ROUTER_BIN`) and assembled into the app bundle as one of the plan's
-//! steps — no repo checkout required.
+//! against an existing (or `--config`-supplied) config.
 //!
-//! Flags:
-//!   --list             print discovered Firefox profiles and exit
-//!   --non-interactive  run the install plan without the TUI (alias: -y, --yes)
-//!   --config <file>    (non-interactive) write this file to ~/.ff-router.toml;
-//!                      without it, an existing ~/.ff-router.toml is used as-is
-//!   --no-set-default   (non-interactive) skip the "become default browser" step
+//! Run with `--help` for the full flag list.
 
 mod app;
 mod config;
@@ -28,13 +19,38 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use app::{Outcome, Wizard};
+use clap::Parser;
 use plan::{Action, AppSource, Decided};
 
+/// Install Firefox Router: assemble the app bundle, register it, and set up the
+/// login item. Runs an interactive TUI by default; pass `--non-interactive` for
+/// scripted setups.
+#[derive(Debug, Parser)]
+#[command(name = "ff-router-installer", version, about)]
+struct Cli {
+    /// Print discovered Firefox profiles and exit.
+    #[arg(long)]
+    list: bool,
+
+    /// Run the install plan headlessly, without the TUI.
+    #[arg(long, short = 'y', visible_alias = "yes")]
+    non_interactive: bool,
+
+    /// Config file to install as ~/.ff-router.toml. Without it, an existing
+    /// ~/.ff-router.toml is reused as-is. (Non-interactive only.)
+    #[arg(long, value_name = "FILE", requires = "non_interactive")]
+    config: Option<PathBuf>,
+
+    /// Skip the "become default browser" step. (Non-interactive only.)
+    #[arg(long, requires = "non_interactive")]
+    no_set_default: bool,
+}
+
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let cli = Cli::parse();
 
     // `--list` prints discovered profiles and exits (handy for debugging).
-    if args.iter().any(|a| a == "--list") {
+    if cli.list {
         for p in &discover::discover() {
             println!("{:<20} {:<12} {}", p.name, p.label, p.dir);
         }
@@ -44,11 +60,8 @@ fn main() -> ExitCode {
     // Headless install for scripted setups (dotfiles, CI). Skips the TUI and the
     // interactive-terminal requirement below; profiles are expected to exist
     // already (the caller creates them) and the config is supplied or reused.
-    if args
-        .iter()
-        .any(|a| a == "--non-interactive" || a == "--yes" || a == "-y")
-    {
-        return run_non_interactive(&args);
+    if cli.non_interactive {
+        return run_non_interactive(cli.config.as_deref(), cli.no_set_default);
     }
 
     let profiles = discover::discover();
@@ -117,10 +130,7 @@ fn app_source() -> Result<AppSource, String> {
 /// absent that, the existing `~/.ff-router.toml` is installed around without
 /// being rewritten. Every step is applied; `--no-set-default` drops the final
 /// "become the default browser" prompt.
-fn run_non_interactive(args: &[String]) -> ExitCode {
-    let no_set_default = args.iter().any(|a| a == "--no-set-default");
-    let config_arg = flag_value(args, "--config");
-
+fn run_non_interactive(config_arg: Option<&Path>, no_set_default: bool) -> ExitCode {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
         eprintln!("error: HOME is not set");
         return ExitCode::FAILURE;
@@ -128,7 +138,7 @@ fn run_non_interactive(args: &[String]) -> ExitCode {
     let target = home.join(".ff-router.toml");
 
     // Decide the config text and whether the plan should (over)write the file.
-    let (config_contents, write_config) = match &config_arg {
+    let (config_contents, write_config) = match config_arg {
         Some(path) => match std::fs::read_to_string(path) {
             Ok(text) => (text, true),
             Err(e) => {
@@ -197,21 +207,6 @@ fn run_non_interactive(args: &[String]) -> ExitCode {
     code
 }
 
-/// The value following `name` in `args`, supporting both `--flag value` and
-/// `--flag=value`.
-fn flag_value(args: &[String], name: &str) -> Option<PathBuf> {
-    let eq_prefix = format!("{name}=");
-    for (i, arg) in args.iter().enumerate() {
-        if arg == name {
-            return args.get(i + 1).map(PathBuf::from);
-        }
-        if let Some(rest) = arg.strip_prefix(&eq_prefix) {
-            return Some(PathBuf::from(rest));
-        }
-    }
-    None
-}
-
 /// Execute the decided plan with plain-text logging (the TUI is already torn
 /// down, so command output is safe to print here).
 fn execute(plan: &[plan::Decided], warnings: &[String]) -> ExitCode {
@@ -261,26 +256,40 @@ fn red(s: &str) -> String {
 mod tests {
     use super::*;
 
-    fn args(list: &[&str]) -> Vec<String> {
-        list.iter().map(|s| (*s).to_string()).collect()
+    /// clap's own lint pass: catches conflicting shorts, bad `requires`, etc.
+    #[test]
+    fn cli_definition_is_valid() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
     }
 
     #[test]
-    fn flag_value_reads_separate_and_joined_forms() {
-        assert_eq!(
-            flag_value(&args(&["--config", "/a/b.toml"]), "--config"),
-            Some(PathBuf::from("/a/b.toml"))
-        );
-        assert_eq!(
-            flag_value(&args(&["--config=/a/b.toml"]), "--config"),
-            Some(PathBuf::from("/a/b.toml"))
-        );
+    fn config_accepts_both_forms_and_all_aliases() {
+        for flag in ["--non-interactive", "--yes", "-y"] {
+            let cli = Cli::try_parse_from(["ff-router-installer", flag]).unwrap();
+            assert!(cli.non_interactive, "{flag} should set non_interactive");
+        }
+        // `--config value` and `--config=value` both parse to the same path.
+        for form in [
+            ["--config", "/a/b.toml"].as_slice(),
+            ["--config=/a/b.toml"].as_slice(),
+        ] {
+            let argv = [&["ff-router-installer", "-y"], form].concat();
+            let cli = Cli::try_parse_from(argv).unwrap();
+            assert_eq!(cli.config.as_deref(), Some(Path::new("/a/b.toml")));
+        }
     }
 
     #[test]
-    fn flag_value_is_none_when_absent_or_dangling() {
-        assert_eq!(flag_value(&args(&["--non-interactive"]), "--config"), None);
-        // Flag present as the last arg with no following value.
-        assert_eq!(flag_value(&args(&["--config"]), "--config"), None);
+    fn config_requires_non_interactive() {
+        // --config / --no-set-default are meaningless without --non-interactive
+        // and are now rejected rather than silently ignored.
+        assert!(Cli::try_parse_from(["ff-router-installer", "--config", "/a.toml"]).is_err());
+        assert!(Cli::try_parse_from(["ff-router-installer", "--no-set-default"]).is_err());
+    }
+
+    #[test]
+    fn unknown_flags_are_rejected() {
+        assert!(Cli::try_parse_from(["ff-router-installer", "--no-set-defualt", "-y"]).is_err());
     }
 }
