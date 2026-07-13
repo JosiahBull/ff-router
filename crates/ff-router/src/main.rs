@@ -106,7 +106,7 @@ mod macos {
 
         unsafe impl NSApplicationDelegate for Delegate {
             #[unsafe(method(application:openURLs:))]
-            fn open_urls(&self, _app: &NSApplication, urls: &NSArray<NSURL>) {
+            fn open_urls(&self, app: &NSApplication, urls: &NSArray<NSURL>) {
                 // One Apple Event delivers the whole batch, so the opener is
                 // shared across these URLs (in practice there is only one).
                 let opener = current_opener();
@@ -115,6 +115,11 @@ mod macos {
                         super::launch(&s.to_string(), opener.as_ref());
                     }
                 }
+                // Launch Services *activates* us to deliver the open, which
+                // re-promotes the process to a regular (Foreground) app — Dock
+                // icon + Cmd+Tab entry — silently undoing the Accessory policy
+                // set in `run()`. Demote back on every open so we stay hidden.
+                app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
             }
         }
     );
