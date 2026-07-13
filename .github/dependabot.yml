@@ -1,0 +1,34 @@
+# Dependabot keeps dependencies fresh by opening update PRs on a schedule.
+# Those PRs run the CI workflow (test/fmt/clippy); the dependabot-auto-merge
+# workflow flips on GitHub auto-merge, so a PR lands only once CI is green.
+version: 2
+updates:
+  # Rust crates across the whole workspace (Cargo.toml + Cargo.lock).
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      # Bundle the low-risk bumps into one PR to cut noise; major bumps still
+      # arrive as individual PRs (they auto-merge too, gated on CI).
+      cargo-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # The GitHub Actions used by the CI and release workflows.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      github-actions:
+        patterns:
+          - "*"
