@@ -13,46 +13,19 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # Verify the pushed tag matches every version we ship. Member crates use
-  # `version.workspace = true` (aligned by construction), but the workspace
-  # version and the hand-maintained Info.plist can drift, so check both.
-  version-check:
-    name: Verify tag matches declared versions
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Check every declared version matches the tag
-        run: |
-          set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
-          fail=0
-
-          check() {
-            if [ "$2" != "${tag}" ]; then
-              echo "::error::$1: '$2' does not match tag '${tag}'"
-              fail=1
-            else
-              echo "ok  $1: $2"
-            fi
-          }
-
-          ws=$(awk '/^\[workspace\.package\]/{f=1; next} f && /^version = /{gsub(/"/, "", $3); print $3; exit}' Cargo.toml)
-          check "workspace.package" "${ws}"
-
-          for key in CFBundleShortVersionString CFBundleVersion; do
-            v=$(awk -v k="${key}" '$0 ~ "<key>"k"</key>"{getline; gsub(/.*<string>|<\/string>.*/, ""); print; exit}' Info.plist)
-            check "Info.plist ${key}" "${v}"
-          done
-
-          exit "${fail}"
+  # Run the full merge-gate suite (test, fmt, clippy, and the version check)
+  # against the tag before building. Same reusable workflow CI runs, so there's
+  # no release-only copy of any check — and on a tag the version check also
+  # asserts the tag matches the declared version (see scripts/check-versions.sh).
+  checks:
+    uses: ./.github/workflows/checks.yml
 
   # Build both binaries for arm64 (Apple Silicon) only. macOS runner required:
   # ff-router links AppKit via objc2. macos-latest is itself arm64, so this is a
   # native build, not a cross-compile.
   build:
     name: Build macOS arm64 binaries
-    needs: [version-check]
+    needs: [checks]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
