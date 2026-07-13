@@ -17,6 +17,26 @@ Building from a local checkout instead:
 ./scripts/dev-install.sh
 ```
 
+### Scripted / non-interactive install
+
+For dotfiles bootstraps and other unattended setups, skip the TUI with
+`--non-interactive`. The installer expects the referenced Firefox profiles to
+already exist and reuses `~/.ff-router.toml` (or writes one from `--config`),
+then downloads the release binary, assembles the app, registers it, and
+installs the login item:
+
+```sh
+# Reuse an existing ~/.ff-router.toml, then install the app:
+ff-router-installer --non-interactive
+
+# Or supply the config and skip the default-browser prompt (e.g. in CI):
+ff-router-installer --non-interactive --config ./ff-router.toml --no-set-default
+```
+
+Everything else is identical to the interactive install; only the profile
+discovery and step-by-step confirmation are skipped. Run
+`ff-router-installer --help` for the full flag list.
+
 ## Configure
 
 The installer writes `~/.ff-router.toml` for you. To create or edit it by hand
