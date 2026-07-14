@@ -11,7 +11,9 @@
 # `debug`    : when true, append one line per opened link to ~/.ff-router.log
 #               (the URL, the opening app, and the matched rule). Off by
 #               default; the log grows unbounded, so turn it back off when done.
-# `default`  : profile label used when no rule matches.
+# `default`  : optional. Profile label used when no rule matches. Omit it (the
+#               default) to let unmatched links open in whatever profile Firefox
+#               opens on its own — your current window, or its own default profile.
 # `[profiles]`: label -> Firefox profile directory name (under
 #               ~/Library/Application Support/Firefox/Profiles/), or an
 #               absolute path.
@@ -31,11 +33,11 @@
 #               rules skip them.
 
 debug = false
-default = "personal"
+
 
 [profiles]
 work     = "qtIifLeX.Profile 1"        # Firefox "Work" profile
-personal = "dhutbqgo.default-release"   # Firefox "Home" profile
+personal = "dhutbqgo.default-release"   # Firefox "Home" profile (Firefox's default)
 
 [[rule]]
 profile = "work"
