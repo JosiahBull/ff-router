@@ -1,4 +1,4 @@
-//! The full-screen wizard: pick the default profile, enter globs per other
+//! The full-screen wizard: pick your main profile, enter globs per other
 //! profile, review the config, then step through the install plan
 //! action-by-action (with a diff-powered conflict resolver).
 
@@ -49,7 +49,7 @@ pub enum Outcome {
 }
 
 enum Step {
-    Default,
+    Main,
     Globs,
     Review,
     Plan,
@@ -60,7 +60,7 @@ pub struct Wizard {
     staging: PathBuf,
     profiles: Vec<Profile>,
     globs: Vec<String>, // parallel to `profiles`
-    default_idx: usize,
+    main_idx: usize,
     step: Step,
     list: ListState,
     edit_order: Vec<usize>, // non-default profile indices, in edit order
@@ -93,8 +93,8 @@ impl Wizard {
             staging,
             profiles,
             globs,
-            default_idx: 0,
-            step: Step::Default,
+            main_idx: 0,
+            step: Step::Main,
             list,
             edit_order: Vec::new(),
             edit_pos: 0,
@@ -136,16 +136,16 @@ impl Wizard {
             return Some(Outcome::Cancelled);
         }
         match self.step {
-            Step::Default => match key.code {
+            Step::Main => match key.code {
                 KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
                 KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
-                KeyCode::Enter => self.confirm_default(),
+                KeyCode::Enter => self.confirm_main(),
                 KeyCode::Esc | KeyCode::Char('q') => return Some(Outcome::Cancelled),
                 _ => {}
             },
             Step::Globs => match key.code {
                 KeyCode::Enter => self.confirm_globs(),
-                KeyCode::Esc => self.step = Step::Default,
+                KeyCode::Esc => self.step = Step::Main,
                 KeyCode::Backspace => {
                     if self.cursor > 0 {
                         self.cursor -= 1;
@@ -164,7 +164,7 @@ impl Wizard {
             },
             Step::Review => match key.code {
                 KeyCode::Enter | KeyCode::Char('y') => self.start_plan(),
-                KeyCode::Char('b') => self.step = Step::Default,
+                KeyCode::Char('b') => self.step = Step::Main,
                 KeyCode::Esc | KeyCode::Char('q') => return Some(Outcome::Cancelled),
                 KeyCode::Up | KeyCode::Char('k') => {
                     self.review_scroll = self.review_scroll.saturating_sub(1);
@@ -234,10 +234,10 @@ impl Wizard {
         self.list.select(Some((cur + delta).rem_euclid(n) as usize));
     }
 
-    fn confirm_default(&mut self) {
-        self.default_idx = self.list.selected().unwrap_or(0);
+    fn confirm_main(&mut self) {
+        self.main_idx = self.list.selected().unwrap_or(0);
         self.edit_order = (0..self.profiles.len())
-            .filter(|&i| i != self.default_idx)
+            .filter(|&i| i != self.main_idx)
             .collect();
         self.edit_pos = 0;
         if self.edit_order.is_empty() {
@@ -270,7 +270,7 @@ impl Wizard {
     }
 
     fn config(&self) -> String {
-        config::gen_config(&self.profiles, self.default_idx, &self.globs)
+        config::gen_config(&self.profiles, self.main_idx, &self.globs)
     }
 
     fn start_plan(&mut self) {
@@ -324,7 +324,7 @@ impl Wizard {
         let [body, footer] =
             Layout::vertical([Constraint::Min(3), Constraint::Length(3)]).areas(frame.area());
         match self.step {
-            Step::Default => self.render_default(frame, body),
+            Step::Main => self.render_main(frame, body),
             Step::Globs => self.render_globs(frame, body),
             Step::Review => self.render_review(frame, body),
             Step::Plan => self.render_plan(frame, body),
@@ -338,7 +338,7 @@ impl Wizard {
 
     fn help(&self) -> String {
         match self.step {
-            Step::Default => "↑/↓ move · Enter: set as default · q/Esc quit".into(),
+            Step::Main => "↑/↓ move · Enter: choose · q/Esc quit".into(),
             Step::Globs => "type globs · Enter: next · Esc: back".into(),
             Step::Review if self.review_max_scroll > 0 => {
                 "Enter/y: install · b: back · q/Esc: cancel · ↑/↓ j/k g/G: scroll".into()
@@ -355,7 +355,7 @@ impl Wizard {
         }
     }
 
-    fn render_default(&mut self, frame: &mut Frame, area: Rect) {
+    fn render_main(&mut self, frame: &mut Frame, area: Rect) {
         let items: Vec<ListItem> = self
             .profiles
             .iter()
@@ -365,7 +365,7 @@ impl Wizard {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(" Which profile is the DEFAULT? (used when no rule matches) "),
+                    .title(" Which is your main profile? (you'll add rules for the others) "),
             )
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
             .highlight_symbol("● ");
@@ -605,7 +605,7 @@ mod tests {
             },
             PathBuf::from("/stage"),
         );
-        wizard.confirm_default(); // default = Home (index 0); now editing Work
+        wizard.confirm_main(); // main = Home (index 0); now editing Work
         assert!(matches!(wizard.step, Step::Globs));
         wizard
     }

@@ -3,18 +3,21 @@
 use crate::discover::Profile;
 
 /// Build the config text. `globs[i]` is the raw whitespace-separated glob line
-/// entered for `profiles[i]` (unused for the default profile).
-pub fn gen_config(profiles: &[Profile], default_idx: usize, globs: &[String]) -> String {
+/// entered for `profiles[i]`; `main_idx`'s profile is the everyday one and
+/// gets no rule of its own. No fallback `default` key is written — links that
+/// match no rule fall through to whatever profile Firefox opens on its own.
+pub fn gen_config(profiles: &[Profile], main_idx: usize, globs: &[String]) -> String {
     let mut out = String::new();
-    out.push_str(&format!(
-        "default = \"{}\"\n\n[profiles]\n",
-        profiles[default_idx].label
+    out.push_str(concat!(
+        "# Links that match no rule below open in Firefox's current/default profile.\n",
+        "# (Add  default = \"<label>\"  above [profiles] to force a specific fallback.)\n\n",
+        "[profiles]\n",
     ));
     for p in profiles {
         out.push_str(&format!("{} = \"{}\"\n", p.label, esc(&p.dir)));
     }
     for (i, p) in profiles.iter().enumerate() {
-        if i == default_idx {
+        if i == main_idx {
             continue;
         }
         let patterns: Vec<&str> = globs[i].split_whitespace().collect();
@@ -117,13 +120,15 @@ mod tests {
         let globs = vec![String::new(), "*://*.atlassian.net/*  *partly.com/*".into()];
         let out = gen_config(&profiles, 0, &globs);
 
-        assert!(out.contains("default = \"home\"\n"));
+        // No forced `default = ...` fallback — unmatched links defer to Firefox.
+        assert!(!out.contains("default = \"home\""));
+        assert!(out.starts_with("# Links that match no rule"));
         assert!(out.contains("home = \"dhutbqgo.default-release\"\n"));
         assert!(out.contains("work = \"qtIifLeX.Profile 1\"\n"));
         assert!(out.contains("[[rule]]\nprofile = \"work\"\nglobs = [\n"));
         assert!(out.contains("    \"*://*.atlassian.net/*\",\n"));
         assert!(out.contains("    \"*partly.com/*\",\n"));
-        // The default profile gets no rule block of its own.
+        // The everyday profile gets no rule block of its own.
         assert_eq!(out.matches("[[rule]]").count(), 1);
     }
 }

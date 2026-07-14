@@ -3,7 +3,7 @@
 A tiny macOS "default browser" that opens each link in the right Firefox
 profile. Set it as your default browser; when you click a link it matches the
 URL against globs in `~/.ff-router.toml` and re-launches Firefox with the
-matching `--profile`.
+matching `--profile` (or lets Firefox choose when nothing matches).
 
 ## Install
 
@@ -28,7 +28,6 @@ cp .ff-router.toml.example ~/.ff-router.toml
 
 ```toml
 debug   = false               # true → log each open to ~/.ff-router.log
-default = "personal"          # profile used when nothing matches
 
 [profiles]                    # label -> Firefox profile directory (or abs path)
 work     = "qtIifLeX.Profile 1"
@@ -48,7 +47,12 @@ both (in which case both must match). `source` globs are tested against the
 opener's bundle id *and* its localized name, so `"Slack"` and
 `"com.tinyspeck.*"` both work. Detection is best-effort: links opened without a
 sender — a terminal `open`, Spotlight, some sandboxed apps — carry no opener, so
-`source` rules simply don't match them and routing falls through to `globs`/`default`.
+`source` rules simply don't match them.
+
+A link that matches no rule opens in whatever profile Firefox opens on its own —
+your current window, or Firefox's default profile — since the router adds no
+`--profile`. To force a specific fallback instead, set a top-level
+`default = "<label>"`.
 
 ### Shared base + local overrides (`extends`)
 
