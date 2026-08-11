@@ -6,6 +6,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
 const APP: &str = "Firefox Router.app";
+/// The subdirectory of ~/Applications the bundle is installed into. Spotlight's
+/// indexer skips the contents of any directory whose name ends in `.noindex`,
+/// which keeps this background helper (and the folder itself) out of Spotlight
+/// and Launchpad. Nothing the router needs goes through Spotlight: Launch
+/// Services keeps its own database, and handler preferences are keyed by bundle
+/// id rather than path, so the default-browser binding survives the move.
+const APP_DIR: &str = "ff-router.noindex";
 const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 const BUNDLE_ID: &str = "com.josiahbull.ff-router";
 /// GitHub `owner/repo` the release binaries are published under.
@@ -36,6 +43,8 @@ pub enum Action {
     FetchApp { source: AppSource, staging: PathBuf },
     /// Move a directory into `dir`.
     MoveInto { from: PathBuf, dir: PathBuf },
+    /// Deregister and delete an app bundle left behind by an earlier install.
+    RemoveApp { path: PathBuf },
     /// Set the executable bit on a file.
     MakeExecutable { path: PathBuf },
     /// Run a command.
@@ -74,15 +83,25 @@ pub struct Decided {
 }
 
 /// Build the plan. The app bundle is fetched and assembled into `staging` by
-/// the [`Action::FetchApp`] step before it is moved into ~/Applications.
+/// the [`Action::FetchApp`] step before it is moved into
+/// ~/Applications/[`APP_DIR`].
 pub fn build(source: AppSource, home: &Path, config: String, staging: &Path) -> Vec<Action> {
-    let apps = home.join("Applications");
+    let apps = home.join("Applications").join(APP_DIR);
     let installed = apps.join(APP);
-    vec![
-        Action::WriteFile {
-            path: home.join(".ff-router.toml"),
-            contents: config,
-        },
+    let mut actions = vec![Action::WriteFile {
+        path: home.join(".ff-router.toml"),
+        contents: config,
+    }];
+
+    // Installs predating the .noindex move left the bundle directly in
+    // ~/Applications. Drop that copy before registering the new one, so Launch
+    // Services can't keep resolving the bundle id to the old, indexed path.
+    let legacy = home.join("Applications").join(APP);
+    if legacy.is_dir() {
+        actions.push(Action::RemoveApp { path: legacy });
+    }
+
+    actions.extend([
         Action::FetchApp {
             source,
             staging: staging.to_path_buf(),
@@ -113,7 +132,8 @@ pub fn build(source: AppSource, home: &Path, config: String, staging: &Path) -> 
                 .into_owned(),
             args: vec!["--set-default".into()],
         },
-    ]
+    ]);
+    actions
 }
 
 impl Action {
@@ -136,6 +156,9 @@ impl Action {
                 from.file_name().unwrap_or_default().to_string_lossy(),
                 home_relative(dir)
             ),
+            Action::RemoveApp { path } => {
+                format!("Remove the previous install at {}", home_relative(path))
+            }
             Action::MakeExecutable { path } => {
                 format!(
                     "Set executable permission (chmod 755) on {}",
@@ -168,6 +191,10 @@ impl Action {
             Action::MoveInto { from, dir } => {
                 format!("{}  →  {}", home_relative(from), home_relative(dir))
             }
+            Action::RemoveApp { path } => format!(
+                "lsregister -u, then rm -rf {} (it moved to ~/Applications/{APP_DIR})",
+                home_relative(path)
+            ),
             Action::MakeExecutable { path } => format!("chmod 755 {}", home_relative(path)),
             Action::Run { program, args, .. } => format!("$ {program} {}", args.join(" ")),
             Action::InstallLoginItem { plist, .. } => {
@@ -216,6 +243,17 @@ impl Action {
                 let target = dir.join(from.file_name().unwrap_or_default());
                 let _ = std::fs::remove_dir_all(&target);
                 check(Command::new("mv").arg(from).arg(&target).status()?)
+            }
+            Action::RemoveApp { path } => {
+                // Best-effort: an unregistered or already-missing bundle is the
+                // outcome we want anyway, so neither step is worth failing on.
+                let _ = Command::new(LSREGISTER)
+                    .arg("-u")
+                    .arg(path)
+                    .stderr(Stdio::null())
+                    .status();
+                let _ = std::fs::remove_dir_all(path);
+                Ok(())
             }
             Action::MakeExecutable { path } => set_executable(path),
             Action::Run { program, args, .. } => check(Command::new(program).args(args).status()?),
@@ -408,6 +446,12 @@ mod tests {
         assert!(actions[2].summary().contains("Firefox Router.app"));
         // The bundle is moved out of the staging dir, not the old dist/.
         assert!(actions[2].detail().contains("/stage/Firefox Router.app"));
+        // ... and into the Spotlight-excluded subdirectory.
+        assert!(
+            actions[2]
+                .detail()
+                .contains("/home/u/Applications/ff-router.noindex")
+        );
         assert!(matches!(actions[3], Action::MakeExecutable { .. }));
         assert!(actions[3].summary().contains("chmod 755"));
         assert!(matches!(actions[4], Action::Run { .. }));
@@ -417,6 +461,63 @@ mod tests {
         assert!(actions[5].detail().contains("launchctl bootstrap"));
         assert!(matches!(actions[6], Action::Run { .. }));
         assert!(actions[6].summary().contains("default browser"));
+    }
+
+    /// A scratch directory to stand in for $HOME, named after the caller so
+    /// concurrently-running tests don't share one.
+    fn scratch_home(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ffr-plan-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn plan_skips_the_migration_step_when_there_is_no_old_install() {
+        let home = scratch_home("fresh");
+        std::fs::create_dir_all(home.join("Applications")).unwrap();
+
+        let actions = build(
+            AppSource::Download {
+                version: "1.2.3".into(),
+            },
+            &home,
+            "cfg".into(),
+            Path::new("/stage"),
+        );
+
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::RemoveApp { .. }))
+        );
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn plan_removes_a_pre_noindex_install_before_installing() {
+        let home = scratch_home("legacy");
+        let legacy = home.join("Applications").join(APP);
+        std::fs::create_dir_all(legacy.join("Contents/MacOS")).unwrap();
+
+        let actions = build(
+            AppSource::Download {
+                version: "1.2.3".into(),
+            },
+            &home,
+            "cfg".into(),
+            Path::new("/stage"),
+        );
+
+        // The old bundle goes before the new one is fetched and registered.
+        let Action::RemoveApp { path } = &actions[1] else {
+            panic!("expected the legacy install to be removed first");
+        };
+        assert_eq!(path, &legacy);
+        assert!(actions[1].summary().contains("previous install"));
+        assert!(matches!(actions[2], Action::FetchApp { .. }));
+
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]
@@ -436,12 +537,12 @@ mod tests {
     #[test]
     fn login_item_plist_points_at_installed_binary() {
         let plist = login_item_plist(Path::new(
-            "/home/u/Applications/Firefox Router.app/Contents/MacOS/ff-router",
+            "/home/u/Applications/ff-router.noindex/Firefox Router.app/Contents/MacOS/ff-router",
         ));
         assert!(plist.contains("<string>com.josiahbull.ff-router</string>"));
         assert!(plist.contains("<key>RunAtLoad</key>"));
         assert!(plist.contains(
-            "<string>/home/u/Applications/Firefox Router.app/Contents/MacOS/ff-router</string>"
+            "<string>/home/u/Applications/ff-router.noindex/Firefox Router.app/Contents/MacOS/ff-router</string>"
         ));
     }
 

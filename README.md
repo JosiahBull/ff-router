@@ -17,6 +17,14 @@ Building from a local checkout instead:
 ./scripts/dev-install.sh
 ```
 
+The app installs to `~/Applications/ff-router.noindex/Firefox Router.app`. The
+`.noindex` suffix tells Spotlight's indexer to skip that directory, which keeps
+a background helper you never launch by hand out of Spotlight and Launchpad.
+Nothing else is affected: Launch Services has its own database and keys handler
+preferences by bundle id, so it still appears under **Default web browser** and
+still receives every link. Re-running the installer over an install that
+predates this migrates the old copy for you.
+
 ## Configure
 
 The installer writes `~/.ff-router.toml` for you. To create or edit it by hand

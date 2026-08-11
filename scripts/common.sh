@@ -12,7 +12,14 @@ BUNDLE_ID="com.josiahbull.ff-router"
 LAUNCH_AGENT="${HOME}/Library/LaunchAgents/${BUNDLE_ID}.plist"
 
 DIST="${REPO_ROOT}/dist"
-DEST="${HOME}/Applications"
+# The bundle lives in a `.noindex` subdirectory: Spotlight's indexer skips the
+# contents of any directory whose name ends that way, keeping this background
+# helper out of Spotlight and Launchpad. Launch Services is unaffected — it has
+# its own database, and keys handler preferences by bundle id, not path.
+APP_DIR="ff-router.noindex"
+DEST="${HOME}/Applications/${APP_DIR}"
+# Where installs before the .noindex move put the bundle; still cleaned up.
+LEGACY_DEST="${HOME}/Applications"
 # Default to the host triple, but let callers override by exporting TARGET
 # (the release workflow pins TARGET=aarch64-apple-darwin this way).
 TARGET="${TARGET:-$(rustc -vV | awk '/^host:/{print $2}')}"

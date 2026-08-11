@@ -86,7 +86,7 @@ fn main() -> ExitCode {
     }
 
     // Assemble the bundle in a throwaway staging dir; it's cleaned up after the
-    // plan runs (the .app is moved out into ~/Applications).
+    // plan runs (the .app is moved out into ~/Applications/ff-router.noindex).
     let staging = std::env::temp_dir().join(format!("ff-router-install-{}", std::process::id()));
 
     let mut terminal = ratatui::init();
