@@ -293,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "ff-router"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "block2",
  "chrono",
@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "ff-router-installer"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "clap",
  "ratatui",

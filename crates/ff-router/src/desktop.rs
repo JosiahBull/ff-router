@@ -37,6 +37,8 @@ impl DesktopConfig {
         // Workspace content only: documentation, login, and marketing stay web.
         if self.linear
             && host == "linear.app"
+            // Linear explicitly requests a browser for some integration flows.
+            && !url.query_pairs().any(|(key, value)| key == "noRedirect" && value == "1")
             && path.len() >= 2
             && matches!(
                 path[1],
@@ -209,6 +211,23 @@ mod tests {
             "linear://linear.app/example/issue/ENG-123/title?foo=a%20b#comment-1"
         );
         assert!(DesktopConfig::default().route(input).is_none());
+    }
+
+    #[test]
+    fn linear_browser_override_and_slack_authorization_stay_in_browser() {
+        for input in [
+            "https://linear.app/example/settings/integrations/slack?noRedirect=1",
+            "https://linear.app/example/project/test/overview?foo=bar&noRedirect=1#updates",
+            "https://linear.app/example/issue/ENG-123?noRedirect=%31",
+            "https://slack.com/oauth/v2/authorize?client_id=123&state=test",
+        ] {
+            assert!(enabled().route(input).is_none(), "{input}");
+        }
+        assert!(
+            enabled()
+                .route("https://linear.app/example/issue/ENG-123?noRedirect=0")
+                .is_some()
+        );
     }
 
     #[test]

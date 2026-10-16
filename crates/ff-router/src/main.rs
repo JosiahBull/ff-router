@@ -9,7 +9,7 @@ use std::process::Command;
 
 use config::{Config, Opener};
 
-const FIREFOX: &str = "/Applications/Firefox.app/Contents/MacOS/firefox";
+const FIREFOX: &str = "/Applications/Firefox.app";
 
 fn main() {
     match std::env::args().nth(1).as_deref() {
@@ -67,7 +67,12 @@ fn launch(url: &str, opener: Option<&Opener>) {
         None => None,
     };
 
-    let mut cmd = Command::new(FIREFOX);
+    // Launch Services gives Firefox its own macOS application context. Direct
+    // execution can inherit the caller's restrictions on browser profile data.
+    // A new launch ensures --args is delivered even when Firefox is running;
+    // Firefox forwards the URL to the existing instance for the chosen profile.
+    let mut cmd = Command::new("/usr/bin/open");
+    cmd.args(["-n", "-a", FIREFOX, "--args"]);
     if let Some(profile) = profile {
         cmd.arg("--profile").arg(profile);
     }

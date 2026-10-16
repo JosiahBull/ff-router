@@ -86,6 +86,9 @@ contain the workspace ID. Workspace permalink URLs need an entry in
 or its web client URL.
 
 Documentation, marketing, login, and unsupported paths keep using Firefox.
+Linear links with `noRedirect=1` also stay in Firefox, respecting Linear's
+explicit browser override for integration flows. Firefox is launched through
+macOS Launch Services with the configured profile.
 If macOS cannot launch the destination app, the router uses the existing
 Firefox profile rules. Remove a setting or set it to `false` to disable it.
 
