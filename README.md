@@ -1,8 +1,8 @@
 # firefox-link-router
 
 A tiny macOS "default browser" that opens each link in the right Firefox
-profile. Set it as your default browser; when you click a link it matches the
-URL against globs in `~/.ff-router.toml` and re-launches Firefox with the
+profile or directly in Linear, Notion, and Slack. Set it as your default
+browser; when you click a link it matches the URL against globs in `~/.ff-router.toml` and re-launches Firefox with the
 matching `--profile` (or lets Firefox choose when nothing matches).
 
 ## Install
@@ -61,6 +61,42 @@ A link that matches no rule opens in whatever profile Firefox opens on its own �
 your current window, or Firefox's default profile — since the router adds no
 `--profile`. To force a specific fallback instead, set a top-level
 `default = "<label>"`.
+
+### Open desktop apps directly
+
+Enable these destinations to skip Firefox for supported links. Add this before
+any `[[rule]]` entries:
+
+```toml
+[desktop]
+linear = true
+notion = true
+slack = true
+
+[desktop.slack_workspaces]
+example = "T123ABC"  # example.slack.com -> Slack workspace ID
+```
+
+Desktop destinations run before Firefox profile rules. Linear workspace links
+and Notion page links open in their installed apps, preserving queries and
+fragments. Slack channel and message links open in Slack; message timestamps
+and thread context are preserved. `app.slack.com/client/T…/C…` links already
+contain the workspace ID. Workspace permalink URLs need an entry in
+`desktop.slack_workspaces`; find the ID in Slack's **Copy link** to a channel
+or its web client URL.
+
+Documentation, marketing, login, and unsupported paths keep using Firefox.
+If macOS cannot launch the destination app, the router uses the existing
+Firefox profile rules. Remove a setting or set it to `false` to disable it.
+
+This applies to links handed to the system default browser, including links
+from other apps and `open https://…` in a terminal. Links clicked inside Firefox
+stay under Firefox's control; the router cannot intercept navigation inside
+an existing browser tab.
+
+Slack's [desktop deep-link formats](https://docs.slack.dev/interactivity/deep-linking/)
+use workspace and channel IDs. Linear also documents its
+[`linear://` links](https://linear.app/docs/get-the-app).
 
 ### Shared base + local overrides (`extends`)
 

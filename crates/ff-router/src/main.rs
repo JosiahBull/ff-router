@@ -1,8 +1,9 @@
 //! A thin macOS "default browser" that routes clicked links to the right
-//! Firefox profile based on globs in `~/.ff-router.toml`.
+//! desktop app or Firefox profile configured in `~/.ff-router.toml`.
 
 mod config;
 mod debug;
+mod desktop;
 
 use std::process::Command;
 
@@ -21,12 +22,40 @@ fn main() {
     }
 }
 
-/// Launch Firefox with the URL in the profile the config routes it to, given
-/// the application that opened it (`None` if unknown). Falls back to Firefox's
+/// Open a supported desktop destination, or launch Firefox in the configured
+/// profile, given the application that opened it (`None` if unknown). Falls back to Firefox's
 /// default profile when there is no config or no match. When the config has
 /// `debug = true`, appends the decision to `~/.ff-router.log`.
 fn launch(url: &str, opener: Option<&Opener>) {
     let config = Config::load();
+    if let Some(c) = &config
+        && let Some(target) = c.desktop.route(url)
+    {
+        // Address the app explicitly: sending the original HTTPS URL back to
+        // Launch Services would recurse through this default browser.
+        let opened = Command::new("/usr/bin/open")
+            .args(["-b", target.bundle_id, &target.url])
+            .status()
+            .is_ok_and(|status| status.success());
+        if c.is_debug() {
+            debug::log(
+                url,
+                opener,
+                &format!(
+                    "desktop {}{}",
+                    target.bundle_id,
+                    if opened {
+                        ""
+                    } else {
+                        " unavailable; falling back to Firefox"
+                    }
+                ),
+            );
+        }
+        if opened {
+            return;
+        }
+    }
     let profile = match &config {
         // Debug on: resolve *and* explain, then log the decision.
         Some(c) if c.is_debug() => {

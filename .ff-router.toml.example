@@ -34,6 +34,16 @@
 
 debug = false
 
+# Skip Firefox for installed desktop apps (optional; off when omitted).
+[desktop]
+linear = true
+notion = true
+slack = true
+
+# Slack workspace subdomain -> workspace ID, for /archives/… permalinks.
+# app.slack.com/client/T…/C… links need no mapping.
+[desktop.slack_workspaces]
+# example = "T123ABC"
 
 [profiles]
 work     = "qtIifLeX.Profile 1"        # Firefox "Work" profile

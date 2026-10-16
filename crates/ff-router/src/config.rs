@@ -27,6 +27,8 @@ pub struct Config {
     /// When true, append each routing decision (URL, opener, matched rule) to
     /// `~/.ff-router.log`. Off by default.
     debug: bool,
+    /// Optional direct desktop destinations, evaluated before Firefox rules.
+    pub desktop: crate::desktop::DesktopConfig,
     /// Profile label used when no rule matches (falls back to Firefox's own
     /// default profile if unset).
     default: Option<String>,
