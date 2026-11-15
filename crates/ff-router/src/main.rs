@@ -77,7 +77,14 @@ fn launch(url: &str, opener: Option<&Opener>) {
         cmd.arg("--profile").arg(profile);
     }
     cmd.arg(url);
-    let _ = cmd.spawn();
+    // The router stays running for days, so every `open` it starts must be
+    // reaped or it lingers as a zombie. Wait off the main thread so the run
+    // loop isn't blocked while Firefox starts.
+    if let Ok(mut child) = cmd.spawn() {
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
 }
 
 mod macos {
