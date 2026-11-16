@@ -13,7 +13,7 @@ const PROFILES_DIR: &str = "Library/Application Support/Firefox/Profiles";
 /// Event that delivered it. Either field may be absent (e.g. a process without
 /// an `Info.plist`), and callers pass `None` when there is no discernible
 /// sender at all (terminal `open`, Spotlight, direct invocation).
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Opener {
     /// The opener's `CFBundleIdentifier`, e.g. `com.tinyspeck.slackmacgap`.
     pub bundle_id: Option<String>,

@@ -6,6 +6,7 @@ mod debug;
 mod desktop;
 
 use std::process::Command;
+use std::sync::mpsc;
 
 use config::{Config, Opener};
 
@@ -17,7 +18,12 @@ fn main() {
         Some("--set-default") => macos::set_default_browser(),
         // Direct invocation with a URL (terminal use / testing) skips AppKit,
         // so there is no opening application to attribute it to.
-        Some(url) if url.starts_with("http://") || url.starts_with("https://") => launch(url, None),
+        Some(url) if url.starts_with("http://") || url.starts_with("https://") => {
+            // Stay alive until a desktop open finishes so its fallback can run.
+            if let Some(finished) = launch(url, None) {
+                let _ = finished.recv();
+            }
+        }
         _ => macos::run(),
     }
 }
@@ -26,21 +32,22 @@ fn main() {
 /// profile, given the application that opened it (`None` if unknown). Falls back to Firefox's
 /// default profile when there is no config or no match. When the config has
 /// `debug = true`, appends the decision to `~/.ff-router.log`.
-fn launch(url: &str, opener: Option<&Opener>) {
+///
+/// Returns without waiting for either app to start. A desktop open finishes
+/// on a background queue, and the returned receiver hears when it has.
+fn launch(url: &str, opener: Option<&Opener>) -> Option<mpsc::Receiver<()>> {
     let config = Config::load();
-    if let Some(c) = &config
-        && let Some(target) = c.desktop.route(url)
-    {
-        // Address the app explicitly: sending the original HTTPS URL back to
-        // Launch Services would recurse through this default browser.
-        let opened = Command::new("/usr/bin/open")
-            .args(["-b", target.bundle_id, &target.url])
-            .status()
-            .is_ok_and(|status| status.success());
-        if c.is_debug() {
+    let Some(target) = config.as_ref().and_then(|c| c.desktop.route(url)) else {
+        open_in_firefox(url, opener, config.as_ref());
+        return None;
+    };
+    let (url, opener) = (url.to_owned(), opener.cloned());
+    let (done, finished) = mpsc::channel();
+    macos::open_in_app(&target, move |opened| {
+        if config.as_ref().is_some_and(Config::is_debug) {
             debug::log(
-                url,
-                opener,
+                &url,
+                opener.as_ref(),
                 &format!(
                     "desktop {}{}",
                     target.bundle_id,
@@ -52,11 +59,18 @@ fn launch(url: &str, opener: Option<&Opener>) {
                 ),
             );
         }
-        if opened {
-            return;
+        if !opened {
+            open_in_firefox(&url, opener.as_ref(), config.as_ref());
         }
-    }
-    let profile = match &config {
+        let _ = done.send(());
+    });
+    Some(finished)
+}
+
+/// Launch Firefox in the profile the config picks for `url`, or in its default
+/// profile when there is no config.
+fn open_in_firefox(url: &str, opener: Option<&Opener>, config: Option<&Config>) {
+    let profile = match config {
         // Debug on: resolve *and* explain, then log the decision.
         Some(c) if c.is_debug() => {
             let decision = c.decide(url, opener);
@@ -94,13 +108,39 @@ mod macos {
     use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send};
     use objc2_app_kit::{
         NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSRunningApplication,
-        NSWorkspace,
+        NSWorkspace, NSWorkspaceOpenConfiguration,
     };
     use objc2_foundation::{
         NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSBundle, NSError, NSString, NSURL,
     };
 
     use super::Opener;
+    use super::desktop::Destination;
+
+    /// Open `target.url` in its desktop app without waiting for the app to
+    /// start. `done` runs once with whether it opened: straight away when the
+    /// app isn't installed, otherwise on a background queue once Launch
+    /// Services has handed the URL over.
+    pub fn open_in_app(target: &Destination, done: impl Fn(bool) + 'static) {
+        let workspace = NSWorkspace::sharedWorkspace();
+        // Address the app explicitly: sending the original HTTPS URL back to
+        // Launch Services would recurse through this default browser.
+        let app =
+            workspace.URLForApplicationWithBundleIdentifier(&NSString::from_str(target.bundle_id));
+        let url = NSURL::URLWithString(&NSString::from_str(&target.url));
+        let (Some(app), Some(url)) = (app, url) else {
+            return done(false);
+        };
+        let completion = RcBlock::new(move |_: *mut NSRunningApplication, error: *mut NSError| {
+            done(error.is_null());
+        });
+        workspace.openURLs_withApplicationAtURL_configuration_completionHandler(
+            &NSArray::from_retained_slice(&[url]),
+            &app,
+            &NSWorkspaceOpenConfiguration::configuration(),
+            Some(&completion),
+        );
+    }
 
     /// Ask macOS to make this app the default browser. Uses the async
     /// `NSWorkspace` API (macOS 12+), which shows the system "change your
